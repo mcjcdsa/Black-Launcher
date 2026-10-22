@@ -1,0 +1,23 @@
+.gradle/
+build/
+out/
+.idea/
+*.iml
+*.log
+.DS_Store
+Thumbs.db
+*.class
+local.properties
+.black-launcher/
+
+# Reference / local-only
+HMCL/
+_utf8_test.txt
+*.tmp
+*.bak
+
+# Secrets & local runtime
+account-secrets.json
+**/account-secrets.json
+.env
+.env.*

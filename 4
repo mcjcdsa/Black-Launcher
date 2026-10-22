@@ -1,0 +1,785 @@
+教程:编写启动器
+< 教程
+
+此教程仍需完善。
+你可以帮助我们加入更多信息。
+
+
+此教程的内容需要改进。
+这些内容因翻译质量较低而违反或未达到标准。
+你可以帮助我们来改进此教程。
+
+
+本教程所述内容仅适用于Java版。
+本教程介绍如何制作Java版启动器，并假定你已掌握任何一门编程语言。
+
+
+目录
+1	基本原理
+2	准备
+3	启动参数
+3.1	JVM参数
+3.1.1	-X、-XX参数
+3.1.2	-D参数
+3.1.3	-cp参数
+3.2	Minecraft参数
+3.3	参数获取
+4	游戏文件
+4.1	JSON文件
+4.1.1	版本列表文件
+4.1.2	版本JSON文件
+4.1.3	资源索引文件
+4.1.4	启动器配置文件
+4.2	游戏主文件
+4.3	依赖库文件
+4.3.1	普通库文件
+4.3.2	natives库文件
+4.4	资源文件
+5	正版验证
+5.1	微软账号
+5.1.1	设备代码流登录
+5.1.2	获取代码对
+5.1.3	获取用户授权状态
+5.1.4	授权代码登录
+5.1.5	从授权码获取授权令牌
+5.1.6	用于刷新的令牌
+5.1.7	Xbox Live身份验证
+5.1.8	XSTS身份验证
+5.1.9	获得Minecraft访问令牌
+5.1.10	检查游戏拥有情况
+5.1.11	获取玩家UUID
+6	启动游戏
+7	支持Mod加载器
+7.1	额外的版本json文件
+7.2	支持Fabric
+7.3	支持NeoForge
+8	优化下载
+9	皮肤管理
+9.1	获取皮肤及披风
+9.2	上传皮肤
+9.3	重置皮肤
+10	参考
+11	导航
+基本原理
+Java版制作时采用了“启动器+游戏文件”的模式，因此具有以下三组特性：
+
+游戏文件单独存储，而通过启动器调用JVM（Java Virtual Machine，Java虚拟机）执行游戏主文件并传入一些游戏参数来启动Minecraft。
+游戏依赖库文件以及游戏资源文件由启动器补全。
+玩家离线登录仅由启动器完成，正版登录则需启动器调用Mojang API完成。
+因为有以上三组特性的存在，我们就可以编写一个第三方启动器来接管游戏的文件管理与登录验证。
+
+准备
+要编写一个启动器，你需要：
+
+学会一门编程语言及其配置好它的开发环境。
+已配置好Java运行时环境（Java Runtime Environment，一般使用它的缩写JRE）以用于测试游戏启动，支持最新版本的Java 25或Java 21可于甲骨文官网下载；支持老版本的Java 8可于Java官网下载。
+并已在开发环境安装支持下列功能的库或包：
+
+解析JSON（用于解析启动参数）。
+文件解压（用于解压natives文件）。
+网络IO（用于与Mojang服务器通信，实现正版验证、皮肤管理等）。
+启动参数
+启动参数是用于启动JRE的参数，它将传入java.exe或javaw.exe，使JVM可以通过传入的主类正确地启动游戏。
+
+启动参数分为JVM参数和Minecraft参数两部分。
+
+这对debug很有帮助。另外参考官方启动器的方法能得到更优良的参数。
+
+一般来说，你可以简单地把启动参数分为三个部分：$"java {jvm参数...} {主类名} {游戏参数}"
+
+JVM参数
+-X、-XX参数
+配置JVM，如GC等：
+
+-Xmx1024m 设置最大堆大小为1024MB。
+-Xmn128m 设置新生代堆大小为128MB。
+-XX:+UseG1GC 开启G1垃圾回收器。
+-XX:-UseAdaptiveSizePolicy 自动选择年轻代区大小和相应的Survivor区比例。
+-XX:-OmitStackTraceInFastThrow 省略异常栈信息从而快速抛出。
+-D参数
+配置JVM系统属性，格式为-D<name>=<value>。
+
+如果参数值包含空格，则需要额外在参数值两侧添加双引号。
+
+-Dos.name="Windows 10" -Dos.version=10.0 当前系统名称及版本。
+-Dminecraft.launcher.brand=minecraft-launcher -Dminecraft.launcher.version=2.1.3674 当前启动器名称及版本。
+-Dlog4j.configurationFile=<文件路径>\client-1.12.xml 游戏日志配置文件。
+-Djava.library.path=<natives文件夹路径> 当前系统下游戏运行所需的动态链接库。
+-cp参数
+全称为-classpath。其后为所有当前版本的Minecraft的普通库文件路径及游戏主文件，不同的classpath中间在Windows下用;隔开，其他系统下用:隔开。
+
+Minecraft参数
+以主类名开头，通常为net.minecraft.client.main.Main，若安装Mod加载器则以JSON文件内mainClass键的值为准
+
+参数通常有：
+
+--username 后接用户名。
+--version 后接游戏版本。
+--gameDir 后接游戏路径。
+--assetsDir 后接资源文件路径。
+--assetIndex 后接资源索引版本。
+--uuid 后接用户UUID。
+--accessToken 后接登录令牌。
+--userType 后接用户类型。
+--versionType 后接版本类型，会显示在游戏主界面右下角。
+--width 后接窗口宽度。
+--height 后接窗口高度。
+--server 后接服务器地址，游戏进入时将直接连入服务器
+--port 后接服务器端口号
+这里并没有展示所有参数，而且这些参数可能因版本而异。具体应参考当前版本json文件内提供的信息。
+
+参数获取
+运行此命令可获取当前运行的Minecraft进程的参数：
+
+wmic process where caption="javaw.exe" get commandline /value > args.txt
+wmic process where caption="java.exe" get commandline /value > args_java.txt
+如果系统中没有WMIC，则使用PowerShell Cmdlet：
+
+(Get-CimInstance -ClassName Win32_Process -Filter 'caption="javaw.exe"').CommandLine > args.txt
+(Get-CimInstance -ClassName Win32_Process -Filter 'caption="java.exe"').CommandLine > args_java.txt
+在Linux/macOS下，则可以使用：
+
+cat /proc/`pidof javaw | head -n 1`/cmdline > args.txt
+cat /proc/`pidof java | head -n 1`/cmdline > args_java.txt
+此时args.txt或args_java.txt中大致有这样的文件内容：
+
+CommandLine="<javaw或java路径>" -XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump "-Dos.name=Windows 10" -Dos.version=10.0 -Xms1M -Djava.library.path=<natives文件夹路径> -Dminecraft.launcher.brand=minecraft-launcher -Dminecraft.launcher.version=2.1.3674 -cp <一串用;分开的文件路径> -Xmx2G -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M -Dlog4j.configurationFile=<log4j配置文件路径> net.minecraft.client.main.Main --username <用户名> --version <游戏版本号> --gameDir <游戏路径> --assetsDir <资源文件路径> --assetIndex <资源索引版本> --uuid <用户UUID> --accessToken <登录令牌> --userType mojang --versionType release --width <窗口宽度> --height <窗口高度>
+删去CommandLine=，再将文件改为Shell可识别的扩展名（如.bat）。如此，直接使用cmd命令即可启动Minecraft。
+
+运行前应当注意文件编码，并且还需要注意由官方启动器解压出的natives库文件会被存储在%temp%的临时文件夹下，可能会被垃圾清理软件删除导致无法启动。
+
+游戏文件
+主条目：.minecraft
+JSON文件
+Minecraft大多数信息使用JSON文件存储管理，使用这些JSON文件可以获取下载、管理及启动所需的大部分信息。
+
+版本列表文件
+主条目：教程:编写启动器/version_manifest.json
+该文件可以在Mojang官方服务器下载：https://piston-meta.mojang.com/mc/game/version_manifest.json
+
+内容通常如下：[显示]
+其中，latest中为当前最新版本，分为发布版和快照版。versions后为所有可下载的游戏版本，url后为该版本的json文件下载地址。
+
+版本JSON文件
+主条目：教程:编写启动器/version.json
+该文件一般在下载后存储在.minecraft/versions文件夹下。
+
+内容通常如下：[显示]
+rules
+用于可选条目，使用features判断并应用其action。
+arguments
+1.13新增，用于存储JVM与游戏参数的键值，旧版本为minecraftArguments且不提供JVM参数及rules规则。
+${****}
+字符串模板，替换相应内容来使用。
+assetIndex
+当前版本的资源文件索引，包含其下载地址等信息。
+downloads
+游戏主文件，分为客户端及服务端，包含其下载地址等信息。
+libraries
+游戏所有依赖库，包含其下载地址等信息。
+downloads下的Map均含有artifact键，有些还含有classifiers键。
+只含有artifact键的为-cp参数后所需拼接的路径，注意path键中为不完整路径，请补全为完整路径。
+含有classifiers键的为natives库，在游戏启动前应将对应平台的jar文件解压至natives文件夹。
+logging
+log4j配置文件，包含其下载地址等信息。
+mainClass
+主类名。
+资源索引文件
+参见：资源索引文件
+一般存储于.minecraft/assets/indexes路径下，用于指示objects文件的信息及其下载地址。
+
+该文件的下载地址等信息存储在版本json文件中，该文件可能需要不定期更新。
+
+内容如下：
+
+{
+    "objects": {
+        "icons/icon_16x16.png": {
+            "hash": "bdf48ef6b5d0d23bbb02e17d04865216179f510a",
+            "size": 3665
+        },
+        ...
+    }
+}
+objects文件的下载地址为：
+
+https://resources.download.minecraft.net/<hash的前两位字符>/<hash>
+存储路径为：
+
+.minecraft/assets/objects/<hash的前两位字符>/<hash>
+并在.minecraft/assets/virtual/legacy/留下一份拷贝。
+
+启动器配置文件
+主条目：launcher_profiles.json
+该文件不是必须的，但它是官方启动器的配置文件，所以可用于与官方启动器数据互通，以及Forge安装检验。
+
+最简单的配置文件为：
+
+{
+    "profiles": {
+        "(Default)": {
+            "gameDir": "<游戏目录>",
+            "lastVersionId": "1.14.1",
+            "name": "(Default)"
+        }
+    },
+    "selectedProfileName": "(Default)",
+}
+profiles为启动器中创建的所有配置文件。
+
+游戏主文件
+通常存储于.minecraft/versions/<version>/<version>.jar，下载地址等信息存储在版本json文件中，下载时注意将该文件重命名为对应版本号。
+
+依赖库文件
+通常存储于.minecraft/libraries/路径下，下载地址等信息存储在版本json文件中。
+
+普通库文件
+在启动前需拼接在启动参数的-cp参数后。
+
+natives库文件
+在启动前需解压至natives路径下，具体查看natives库文件。
+
+资源文件
+通常存储在.minecraft/assets/objects/，并在.minecraft/assets/virtual/legacy/有一份拷贝。
+
+下载地址等信息存储在资源索引文件中。
+
+这些文件可能在发布后更新，留意更新资源索引文件来更新它们。
+
+正版验证
+微软账号
+将Mojang账号迁移至微软账号的期限已过。自2020年12月以后，所有的新账号都会使用新的账号系统，旧的账号也已经迁移。新版系统需要经过多个步骤以及获取不同的令牌，但是最后你还是会和旧版系统一样，获得一个普通的Minecraft令牌。启动游戏的本质并没有改变。
+
+在使用微软OAuth登录之前，需要在Azure应用程序中注册一个应用程序，否则无法完成后续需要client_id的步骤。随后，按照Mojang发布的新Java版API应用程序审批流程，你需要在表单中向Mojang提交申请，通过后才可以使你的应用程序访问Minecraft API。
+
+下方列出的使用Content-Type:application/x-www-form-urlencoded的POST请求，其请求体中的换行只是为了方便阅读，实际请求时不应换行。
+
+
+微软OAuth登录分为两种类型：设备代码流登录和授权代码登录。
+
+设备代码流登录提供给输入受限的应用程序环境或公共客户端使用，兑换启动令牌的步骤相对简单，且可以在其他设备授权登录，但安全性较差。
+
+授权代码流则提供给有服务器且有能力存储client_secret的应用程序使用，兑换启动令牌的步骤相对复杂，但安全性极高。
+
+设备代码流登录
+首先转到已经注册且经Mojang审批通过后的应用程序，点击左侧管理 -> Authentication (Preview)，切换到“设置”选项卡并找到“允许公共客户端流”，选择是。
+
+获取代码对
+POST https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode
+被提交的数据为：
+
+client_id=clientid& // Azure客户端ID
+
+scope=XboxLive.signin offline_access
+在其请求头中设置Content-Type:application/x-www-form-urlencoded。
+
+如果请求成功，将会收到如下响应：
+
+{
+  "device_code":device_code, //应用程序需要暂存此代码用于轮询用户授权状态
+  "user_code":user_code, //应用程序需要将此代码展示给用户
+  "verification_uri":verification_uri, //应用程序需要引导用户在此输入授权码并确认授权
+  "expires_in":expires_in, //代码对有效期，在超出此时间后失效，单位为秒
+  "interval":interval, //应用向验证服务器轮询用户授权状态的最小间隔时间，单位为秒
+  "message":message, //用于指导用户登录的文本，默认为英文，可在查询参数中指定 ?mtk=<语言区域性代码> 来将此内容本地化，但建议启动器自行生成文本指导 
+}
+获取用户授权状态
+在引导用户授权时，应用程序需要以interval为间隔，向登录服务器轮询用户授权状态：
+
+POST https://login.microsoftonline.com/consumers/oauth2/v2.0/token
+被提交的数据为：
+
+grant_type=urn:ietf:params:oauth:grant-type:device_code&
+client_id=client_id&
+device_code=device_code
+如果用户同意授权，应用程序将收到如下响应：
+
+{
+    "token_type": "Bearer", // 令牌类型
+    "scope": scope, //申请的权限
+    "expires_in": 3600, //访问令牌过期时间
+    "access_token": access_token, //访问令牌
+    "refresh_token": refresh_token, //刷新令牌
+    "id_token": id_token //如果未要求id令牌则此项不存在
+}
+可能遇到的错误：
+
+authorization_pending：用户未授权
+authorization_declined：用户拒绝了授权
+bad_verification_code：未在提交数据中包含device_code字段或提交的device_code无效
+expired_token：轮询验证时间超过了expires_in的值
+slow_down：应用程序的轮询间隔小于interval给定的值
+遇到除authorization_pending和slow_down外的任何错误时，应用程序应停止轮询并向用户展示错误信息。
+
+授权代码登录
+第一步，我们先登录微软账号。这一步必须在浏览器/网页视图中完成，打开下面的链接：
+
+https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize
+?client_id= //上面Azure应用程序的client_id
+&response_type=code
+&redirect_uri= //需要在上面Azure应用程序中添加，一般采取本地搭建临时Web服务器的方式并将回调URI设为本地地址
+&response_mode=query
+&scope=XboxLive.signin offline_access
+用户需要在此处输入用户名（邮箱、手机号或别的登录方法）以及密码，从而在浏览器窗口中登录微软账号。如果用户名和密码正确，那么用户会被重定向。在这一步中，用户所登录的账号不需要拥有Minecraft。
+
+重定向链接看起来会像这样：
+
+你设定的回调地址/?code=授权码
+你需要提取出其中的code参数，这是你的微软授权码。
+
+从授权码获取授权令牌
+下一步是从授权码中获取授权令牌。由于安全问题，这一步将不在浏览器中完成。
+
+POST https://login.microsoftonline.com/consumers/oauth2/v2.0/token
+被提交的数据：
+
+client_id=clientid& // 还是Azure客户端ID
+    code=authcode& // 第一步中获取的代码
+    grant_type=authorization_code&
+    redirect_uri=url& // 和上一步的值相同，但实际不会回调到此url
+    scope=XboxLive.signin offline_access
+不要忘记设置Content-Type: application/x-www-form-urlencoded
+
+响应看起来会像这样：
+
+{
+   "token_type":"Bearer",
+   "scope":"XboxLive.signin XboxLive.offline_access",
+   "expires_in":3600,
+   "ext_expires_in":3600,
+   "access_token":"<令牌>",
+   "refresh_token":"<用于刷新的令牌>"
+}
+我们需要关注到这里的access_token。
+
+用于刷新的令牌
+你可以使用你在之前请求中收到的refresh_token来获取新access_token。还是调用与以前相同的API，不过切换刷新的令牌authorization_code和授予类型的代码。
+
+POST https://login.microsoftonline.com/consumers/oauth2/v2.0/token
+被提交的数据：
+
+client_id=<Azure应用程序的客户端ID>&
+  client_secret=<Azure应用程序的客户端密钥> //只有Web App需要填写，应当加密存储&
+  refresh_token=<上一步的刷新令牌>&
+  grant_type=refresh_token&
+  scope=XboxLive.signin offline_access
+响应与请求access_token一致。
+
+Xbox Live身份验证
+现在，我们已通过微软身份验证，可以进行Xbox Live身份验证。
+
+我们需要发送：
+
+POST https://user.auth.xboxlive.com/user/authenticate
+{
+    "Properties": {
+        "AuthMethod": "RPS",
+        "SiteName": "user.auth.xboxlive.com",
+        "RpsTicket": "d=<access_token>" // 第二步中获取的访问令牌，如遇"Bad Request"可去掉"d="
+    },
+    "RelyingParty": "http://auth.xboxlive.com",
+    "TokenType": "JWT"
+}
+同样，也需要设置Content-Type: application/json以及Accept: application/json。
+
+响应看起来会像这样：
+
+{
+   "IssueInstant":"2020-12-07T19:52:08.4463796Z",
+   "NotAfter":"2020-12-21T19:52:08.4463796Z",
+   "Token":"token", // 保存它，这是你的XBL令牌
+   "DisplayClaims":{
+      "xui":[
+         {
+            "uhs":"uhs" // 保存
+         }
+      ]
+   }
+}
+我们需要保存这里的Token和uhs。uhs是user hash的缩写，为用户信息哈希值。
+
+XSTS身份验证
+我们已经进行了XBL身份验证，现在需要获取XSTS令牌，使用它就可以登录Minecraft。
+
+POST https://xsts.auth.xboxlive.com/xsts/authorize
+{
+    "Properties": {
+        "SandboxId": "RETAIL",
+        "UserTokens": [
+            "xbl_token" // 上面得到的XBL令牌
+        ]
+    },
+    "RelyingParty": "rp://api.minecraftservices.com/",
+    "TokenType": "JWT"
+}
+同样还是设置Content-Type: application/json以及Accept: application/json
+
+响应看起来会像这样：
+
+{
+   "IssueInstant":"2020-12-07T19:52:09.2345095Z",
+   "NotAfter":"2020-12-08T11:52:09.2345095Z",
+   "Token":"token", // 保存它，这是你的xsts令牌
+   "DisplayClaims":{
+      "xui":[
+         {
+            "uhs":"" // 与上个请求相同
+         }
+      ]
+   }
+}
+获得Minecraft访问令牌
+现在，我们终于可以回到Minecraft身上了。上一个请求中获取的XSTS令牌允许我们验证Minecraft。
+
+POST https://api.minecraftservices.com/authentication/login_with_xbox
+{
+    "identityToken": "XBL3.0 x=<uhs>;<xsts_token>"
+}
+响应：
+
+{
+  "username" : "some uuid", // 这并不是Minecraft账号的UUID
+  "roles" : [ ],
+  "access_token" : "minecraft access token", // JWT，Minecraft访问令牌
+  "token_type" : "Bearer",
+  "expires_in" : 86400
+}
+这个访问令牌（access_token）允许我们启动游戏。但是，在启动游戏之前，我们需要先检查用户所使用的账号是否拥有Minecraft。
+
+检查游戏拥有情况
+那么，现在让我们使用Minecraft的访问令牌来检查该账号是否包含产品许可。
+
+GET https://api.minecraftservices.com/entitlements/mcstore
+访问令牌在验证文件头中：Authorization: Bearer token。
+
+你需要保留Bearer，并在Bearer后添加上一步的访问令牌。
+
+如果用户拥有游戏，那么响应应该像这样：
+
+{
+  "items" : [ {
+    "name" : "product_minecraft",
+    "signature" : "jwt sig"
+  }, {
+    "name" : "game_minecraft",
+    "signature" : "jwt sig"
+  } ],
+  "signature" : "jwt sig",
+  "keyId" : "1"
+}
+第一个jwts会包含值：
+
+{
+  "typ": "JWT",
+  "alg": "RS256",
+  "kid": "1"
+}.{
+  "signerId": "2535416586892404",
+  "name": "product_minecraft"
+}.[Signature]
+最后一个jwt应该是这样解码的：
+
+{
+  "typ": "JWT",
+  "alg": "RS256",
+  "kid": "1"
+}.{
+  "entitlements": [
+    {
+      "name": "product_minecraft"
+    },
+    {
+      "name": "game_minecraft"
+    }
+  ],
+  "signerId": "2535416586892404"
+}.[Signature]
+如果该账号没有拥有游戏，那么项目会为空。
+
+获取玩家UUID
+启动游戏还需要玩家的UUID，我们目前还没有获得。不过只要玩家拥有游戏，就一定有办法获取其UUID：[1][2]
+
+现在我们知道了该账号拥有游戏，那么可以获取它的档案来得到UUID：
+
+GET https://api.minecraftservices.com/minecraft/profile
+同样，访问令牌在验证文件头中：Authorization: Bearer token
+
+如果账号拥有游戏，响应看起来会像这样：
+
+{
+  "id" : "986dec87b7ec47ff89ff033fdb95c4b5", // 账号的真实UUID
+  "name" : "HowDoesAuthWork", // 该账号的Minecraft用户名
+  "skins" : [ {
+    "id" : "6a6e65e5-76dd-4c3c-a625-162924514568",
+    "state" : "ACTIVE",
+    "url" : "http://textures.minecraft.net/texture/1a4af718455d4aab528e7a61f86fa25e6a369d1768dcb13f7df319a713eb810b",
+    "variant" : "CLASSIC",
+    "alias" : "STEVE"
+  } ],
+  "capes" : [ ]
+}
+否则会看起来像这样：
+
+{
+  "path" : "/minecraft/profile",
+  "errorType" : "NOT_FOUND",
+  "error" : "NOT_FOUND",
+  "errorMessage" : "The server has not found anything matching the request URI",
+  "developerMessage" : "The server has not found anything matching the request URI"
+}
+那么这样就可以获取所有必要的数据（Minecraft访问令牌、用户名和UUID）来启动游戏了。
+
+启动游戏
+首先必须保证启动参数中出现的所有文件及提供的资源索引文件中的object文件都存在且未损坏。
+选定一个natives路径。可以自由选定，例如像官方启动器一样使用临时路径。将natives库文件解压至该路径，并将该路径通过-Djava.library.path=传入游戏。
+完成正版验证，得到UUID及accessToken。
+拼接启动参数，创建游戏进程。
+处理游戏输出及游戏错误。
+支持Mod加载器
+
+该段落的内容不代表Mojang Studios或Minecraft Wiki的官方意见。
+在游戏实例安装Forge等Mod加载器后，你会发现：
+
+启动器配置文件中添加了一条新安装的配置。
+.minecraft/libraries/文件夹中多了一些文件。
+.minecraft/versions/文件夹中多了一个版本json文件（也可能会有jar文件）。
+额外的版本json文件
+该文件相比原版的版本json文件文件多了inheritsFrom和jar键，而且其他键内容明显是不完整的。
+
+inheritsFrom
+该参数指定了当前版本所继承的原版版本。意思为，除此版本json文件外，同时使用inheritsFrom中指定的版本json文件内容。即-cp参数后需同时包含两个版本json文件指定的普通库文件及natives库文件，且该版本json文件应优先于原版版本json文件。
+jar
+该参数指定了-cp参数后的游戏主文件。
+除此之外，版本json文件中的libraries键的格式也有些不一样了，如：
+{
+   "name": "org.ow2.asm:asm-all:5.0.3",
+   "serverreq": true
+},
+{
+   "name": "jline:jline:2.13",
+   "url": "http://files.minecraftforge.net/maven/",
+   "checksums": [
+     "2d9530d0a25daffaffda7c35037b046b627bb171"
+   ],
+   "serverreq": true,
+   "clientreq": false
+}
+不再有downloads键了，只剩下name和url。因此，文件路径及下载路径需要根据一定规则拼接。
+
+name键的格式为：
+
+<package>:<name>:<version>
+我们将它变形重组一下：
+
+<package>/<name>/<version>/<name>-<version>.jar
+前方接上.minecraft/libraries/即为文件路径，而接上url的内容即为下载地址。
+
+serverreq和clientreq用于标识客户端和服务端是否需要加载该依赖库。
+
+支持Fabric
+Fabric的支持相比NeoForge等较复杂的加载器的较为简单，本质上就是添加Fabric独有的cp依赖库及替换主类名。
+
+查找Fabric版本列表可以通过"https://meta.fabricmc.net/v2/versions/loader/{MC版本号}/"请求。
+
+请求之后，你会得到一个根元素为数组的version.json的返回。
+
+类似于原版的，它的格式大致是这样的：
+
+[
+  {
+    "loader": {
+      "separator": ".",
+      "build": 14,
+      "maven": "net.fabricmc:fabric-loader:0.16.14",
+      "version": "0.16.14",
+      "stable": true
+    },
+    "intermediary": {
+      "maven": "net.fabricmc:intermediary:1.21.5",
+      "version": "1.21.5",
+      "stable": true
+    },
+    "launcherMeta": {
+      "version": 2,
+      "min_java_version": 8,
+      "libraries": {
+        "client": [],
+        "common": [
+          {
+            "name": "org.ow2.asm:asm:9.8",
+            "url": "https://maven.fabricmc.net/",
+            "md5": "f5adf3bfc54fb3d2cd8e3a1f275084bc",
+            "sha1": "dc19ecb3f7889b7860697215cae99c0f9b6f6b4b",
+            "sha256": "876eab6a83daecad5ca67eb9fcabb063c97b5aeb8cf1fca7a989ecde17522051",
+            "sha512": "cbd250b9c698a48a835e655f5f5262952cc6dd1a434ec0bc3429a9de41f2ce08fcd3c4f569daa7d50321ca6ad1d32e131e4199aa4fe54bce9e9691b37e45060e",
+            "size": 126113
+          },
+          （Fabric额外的依赖库文件）
+        ],
+        "mainClass": {
+          "client": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+          "server": "net.fabricmc.loader.impl.launch.knot.KnotServer"
+        }
+      }
+    }
+  },
+  (通常第一个版本是正式版，其他版本省略)
+]
+然后，我们仅需将依赖库填入cp参数，并填写其所要求的主类名，就可以启动了。
+
+注意：loader和intermediary字段的组件也需要下载。
+
+在启动时，Fabric和原版asm组件版本冲突是常有的事。要解决它，前往.minecraft\libraries\org\ow2\asm\asm把提示冲突的版本移除或不包含在cp参数内即可。
+
+支持NeoForge
+NeoForge相比于Fabric的安装较为复杂，我们可以简单地拆解为：
+
+下载NeoForge安装器并拆包，得到关键信息。
+下载NeoForge核心依赖库文件。
+模拟安装器，顺序执行处理器生成特定文件。
+根据NeoForge的version.json描述传入特定的额外参数，同时注意不和原版参数重合。
+你可以在https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml查询NeoForge安装器版本列表。
+
+它的格式大概是这样的：
+
+<metadata>
+<groupId>net.neoforged</groupId>
+<artifactId>neoforge</artifactId>
+<versioning>
+<latest>21.1.176</latest>
+<release>21.1.176</release>
+<versions>
+<version>20.2.3-beta</version>
+<version>20.2.4-beta</version>
+<version>20.2.5-beta</version>
+<version>20.2.6-beta</version>
+（后面的省略）
+（版本号自旧往新）
+（版本号开头的20.2代表继承于1.20.2版本）
+然后，你就可以通过$"https://maven.neoforged.net/releases/net/neoforged/neoforge/{neoforge版本号}/neoforgeneoforge版本号installer.jar"来下载安装程序了。
+
+把安装程序视为zip包拆包，接下来你会看到以下几个文件：
+
+install_profile.json （模拟安装器需要）
+version.json （启动和下载需要）
+data/client.lzma （补丁文件）
+我们省略对version.json的解析，因为它类似于原版。
+
+打开install_profile.json，就可以看到以下内容：
+
+{"data": {
+    （你需要解析此仓库坐标到一个本地地址）
+        "MC_SLIM": {
+            "client": "[net.minecraft:client:1.20.2-20231019.002635:slim]",
+            "server": "[net.minecraft:server:1.20.2-20231019.002635:slim]"
+        },
+        （这不是一定的，只需要是一个指向补丁文件的地址就好）
+        "BINPATCH": {
+            "client": "/data/client.lzma",
+            "server": "/data/server.lzma"
+        },
+        （其他的格式都差不多，省略）
+    },
+        "processors": [
+            {
+                (主jar文件，你需要继续拆包以得到主类名)
+            "jar": "net.minecraftforge:installertools:1.3.0",
+            "classpath": [
+                （处理器执行所需要依赖库）
+                "org.ow2.asm:asm:9.3@jar",
+                "net.md-5:SpecialSource:1.11.0@jar",
+                "net.sf.jopt-simple:jopt-simple:5.0.4@jar",
+                "com.google.code.gson:gson:2.8.7@jar",
+                "net.minecraftforge:srgutils:0.4.11@jar",
+                "org.ow2.asm:asm-tree:9.3@jar",
+                "com.opencsv:opencsv:4.4@jar",
+                "org.apache.commons:commons-text:1.3@jar",
+                "net.minecraftforge:installertools:1.3.0@jar",
+                "de.siegmar:fastcsv:2.0.0@jar",
+                "org.apache.commons:commons-lang3:3.8.1@jar",
+                "org.apache.commons:commons-collections4:4.2@jar",
+                "org.ow2.asm:asm-commons:9.3@jar",
+                "com.google.guava:guava:20.0@jar",
+                "commons-beanutils:commons-beanutils:1.9.3@jar",
+                "org.ow2.asm:asm-analysis:9.3@jar",
+                "commons-collections:commons-collections:3.2.2@jar",
+                "commons-logging:commons-logging:1.2@jar"
+            ],
+            "args": [
+                （参数，需要将字符串模板替换成上面的）
+                "--task",
+                "MCP_DATA",
+                "--input",
+                "[net.neoforged:neoform:1.20.2-20231019.002635@zip]",
+                "--output",
+                "{MAPPINGS}",
+                "--key",
+                "mappings"
+            ]
+        },
+            ]
+            （这里是工具的依赖库，省略）
+    
+}
+优化下载
+有时，在官方服务器下载文件会很缓慢，这时可以考虑使用第三方镜像下载。
+
+当前常用的第三方镜像有：
+
+BMCLAPI
+另外，Minecraft的依赖库文件和资源索引文件很多为小文件，可以考虑使用多线程下载来优化速度。
+
+皮肤管理
+皮肤管理需要使用Mojang API：
+
+api.minecraftservices.com
+获取皮肤及披风
+可通过发送GET请求获得皮肤及披风地址：
+
+https://sessionserver.mojang.com/session/minecraft/profile/<uuid>
+响应：
+{
+    "id": "<配置标识符>",
+    "name": "<玩家名>",
+    "properties": [ 
+        {
+            "name": "textures",
+            "value": "<base64字符串>"
+        }
+    ]
+}
+解码该base64字符串，可获得另一JSON文档：
+
+{
+    "timestamp": <java time in ms>,
+    "profileId": "<配置UUID>",
+    "profileName": "<玩家名>",
+    "textures": {
+        "SKIN": {
+            "url": "<玩家皮肤URL>"
+        },
+        "CAPE": {
+            "url": "<玩家披风URL>"
+        }
+    }
+}
+上传皮肤
+发送PUT请求至：
+
+https://api.minecraftservices.com/minecraft/profile/skins
+头：
+Authorization: Bearer <access token>
+负载：
+由两部分组成：
+
+model：人物模型，空字符串为Steve模型，“slim”为Alex模型。
+file：原始图像文件数据。
+重置皮肤
+发送DELETE请求至：
+
+https://api.minecraftservices.com/user/profile/skin/active
+头：
+Authorization: Bearer <access token>
+参考
+ Microsoft Authentication Scheme - wiki.vg
+ OAuth 2.0设备授权授予 - Microsoft Learn
