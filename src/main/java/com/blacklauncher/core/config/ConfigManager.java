@@ -5,6 +5,8 @@ import com.blacklauncher.core.util.AppPaths;
 import com.blacklauncher.core.util.JsonUtil;
 import com.blacklauncher.core.util.UuidUtil;
 import com.blacklauncher.core.util.Validation;
+import com.blacklauncher.moddev.ModDevConfig;
+import com.blacklauncher.online.LanConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -160,6 +162,17 @@ public class ConfigManager {
         }
         if (!Validation.isNonBlank(c.getGameLanguage())) {
             c.setGameLanguage("zh_CN");
+        }
+        if (c.getLan() == null) {
+            c.setLan(new LanConfig());
+        }
+        if (c.getModDev() == null) {
+            c.setModDev(new ModDevConfig());
+        }
+        if (c.getBackupKeepCount() < 1) {
+            c.setBackupKeepCount(1);
+        } else if (c.getBackupKeepCount() > 30) {
+            c.setBackupKeepCount(30);
         }
     }
 }

@@ -75,7 +75,9 @@ public final class GameProcessGuard {
                 || kind == DirectoryKind.OPTIONS_TXT
                 || kind == DirectoryKind.MODS
                 || kind == DirectoryKind.CONFIG
-                || kind == DirectoryKind.SERVERS_DAT)) {
+                || kind == DirectoryKind.SERVERS_DAT
+                || kind == DirectoryKind.RESOURCEPACKS
+                || kind == DirectoryKind.SHADERPACKS)) {
             throw new LauncherException("游戏正在运行（"
                     + (runningVersionId().isBlank() ? "未知版本" : runningVersionId())
                     + "），禁止写入 " + kind.description()

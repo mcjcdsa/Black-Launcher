@@ -25,6 +25,8 @@ public final class CrashReportAnalyzer {
         DUPLICATED_MOD,
         FABRIC_WARNINGS,
         FORGE_INCOMPLETE,
+        AUTH_FAILURE,
+        DISK_FULL,
         GENERIC_CRASH
     }
 
@@ -90,6 +92,16 @@ public final class CrashReportAnalyzer {
                             Pattern.CASE_INSENSITIVE),
                     "显卡/OpenGL 问题",
                     "更新显卡驱动；笔记本可尝试强制使用独显；避免软件渲染。"),
+            new Rule(Kind.AUTH_FAILURE,
+                    Pattern.compile("Invalid session|Failed to login|401 Unauthorized|ForbiddenOperationException",
+                            Pattern.CASE_INSENSITIVE),
+                    "登录/会话失败",
+                    "正版令牌可能过期或无效；请在设置中重新微软登录，或检查离线昵称是否合规。"),
+            new Rule(Kind.DISK_FULL,
+                    Pattern.compile("No space left on device|disk full|There is not enough space on the disk",
+                            Pattern.CASE_INSENSITIVE),
+                    "磁盘空间不足",
+                    "清理游戏目录或系统盘空间后重试；可将游戏目录迁移到更大的磁盘。"),
             new Rule(Kind.GENERIC_CRASH,
                     Pattern.compile("---- Minecraft Crash Report ----|#@!@# Game crashed|Game crashed!",
                             Pattern.CASE_INSENSITIVE),

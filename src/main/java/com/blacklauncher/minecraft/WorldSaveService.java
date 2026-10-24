@@ -2,6 +2,8 @@ package com.blacklauncher.minecraft;
 
 import com.blacklauncher.core.config.AppConfig;
 import com.blacklauncher.core.exception.LauncherException;
+import com.blacklauncher.core.util.AppPaths;
+import com.blacklauncher.core.util.PathMigrationService;
 import com.blacklauncher.core.util.Validation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -200,10 +202,7 @@ public class WorldSaveService {
         if (!vr.valid()) {
             throw new LauncherException("存档不合法，拒绝备份: " + String.join("; ", vr.issues()));
         }
-        Path destRoot = com.blacklauncher.core.util.AppPaths.home()
-                .resolve("backups")
-                .resolve("worlds")
-                .resolve(Validation.isSafeVersionId(versionId) ? versionId : "shared")
+        Path destRoot = backupWorldRoot(versionId)
                 .resolve(worldFolderName + "_" + BACKUP_TS.format(LocalDateTime.now()));
         try {
             long bytes = copyTree(source, destRoot);
@@ -212,6 +211,83 @@ public class WorldSaveService {
         } catch (Exception e) {
             throw new LauncherException("备份存档失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Keeps the newest {@code keepN} backup folders for a world; deletes older ones.
+     * Backup dirs are named {@code {worldFolderName}_{yyyyMMdd_HHmmss}} under
+     * {@code backups/worlds/{versionId}/}.
+     */
+    public void rotateBackups(String versionId, String worldFolderName, int keepN) throws Exception {
+        if (!ContentPackValidator.looksLikeWorldName(worldFolderName)) {
+            throw new LauncherException("非法存档名");
+        }
+        int keep = Math.max(1, Math.min(30, keepN));
+        Path root = backupWorldRoot(versionId);
+        if (!Files.isDirectory(root)) {
+            return;
+        }
+        String prefix = worldFolderName + "_";
+        List<Path> matches = new ArrayList<>();
+        try (Stream<Path> stream = Files.list(root)) {
+            stream.filter(Files::isDirectory)
+                    .filter(p -> p.getFileName().toString().startsWith(prefix))
+                    .forEach(matches::add);
+        }
+        matches.sort(Comparator.comparingLong((Path p) -> {
+            try {
+                return Files.getLastModifiedTime(p).toMillis();
+            } catch (IOException e) {
+                return 0L;
+            }
+        }).reversed());
+        for (int i = keep; i < matches.size(); i++) {
+            Path old = matches.get(i);
+            PathMigrationService.deleteTree(old, false);
+            LOG.info("Rotated away old world backup {}", old);
+        }
+    }
+
+    /**
+     * Copies a world folder from one version's saves dir into another's.
+     */
+    public void migrateWorld(String fromVersionId, String toVersionId, String worldFolderName, boolean overwrite)
+            throws Exception {
+        GameProcessGuard.get().requireWritable(DirectoryKind.SAVES);
+        if (!Validation.isSafeVersionId(fromVersionId) || !Validation.isSafeVersionId(toVersionId)) {
+            throw new LauncherException("非法版本 ID");
+        }
+        if (!ContentPackValidator.looksLikeWorldName(worldFolderName)) {
+            throw new LauncherException("非法存档名");
+        }
+        if (fromVersionId.equals(toVersionId)) {
+            throw new LauncherException("源版本与目标版本相同");
+        }
+        MinecraftLayout fromLayout = MinecraftLayout.forVersion(config, fromVersionId);
+        MinecraftLayout toLayout = MinecraftLayout.forVersion(config, toVersionId);
+        Path source = fromLayout.resolve(DirectoryKind.SAVES).resolve(worldFolderName);
+        ContentPackValidator.ValidationResult vr = ContentPackValidator.validateWorldFolder(source);
+        if (!vr.valid()) {
+            throw new LauncherException("源存档不合法，拒绝迁移: " + String.join("; ", vr.issues()));
+        }
+        Path destSaves = toLayout.resolve(DirectoryKind.SAVES);
+        Files.createDirectories(destSaves);
+        Path dest = destSaves.resolve(worldFolderName);
+        if (Files.exists(dest)) {
+            if (!overwrite) {
+                throw new LauncherException("目标版本已存在同名存档: " + worldFolderName);
+            }
+            PathMigrationService.deleteTree(dest, false);
+        }
+        copyTree(source, dest);
+        LOG.info("Migrated world {} from {} to {}", worldFolderName, fromVersionId, toVersionId);
+    }
+
+    private static Path backupWorldRoot(String versionId) {
+        return AppPaths.home()
+                .resolve("backups")
+                .resolve("worlds")
+                .resolve(Validation.isSafeVersionId(versionId) ? versionId : "shared");
     }
 
     private static long copyTree(Path source, Path dest) throws IOException {

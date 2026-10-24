@@ -79,6 +79,53 @@
     -fx-text-fill: #8892A0;
 }
 
+.site-nav {
+    -fx-padding: 4 0 0 0;
+}
+
+.site-group-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: 600;
+    -fx-text-fill: #E4E7ED;
+    -fx-padding: 4 0 2 0;
+}
+
+.site-row {
+    -fx-background-radius: 4;
+}
+
+.site-row:hover {
+    -fx-background-color: #1a1e25;
+}
+
+.site-name {
+    -fx-text-fill: #E4E7ED;
+    -fx-font-size: 13px;
+}
+
+.site-url {
+    -fx-font-size: 11px;
+    -fx-text-fill: #8892A0;
+}
+
+.site-row:hover .site-url {
+    -fx-text-fill: #3478D9;
+}
+
+.nav-disclaimer {
+    -fx-font-size: 11px;
+    -fx-line-spacing: 2;
+}
+
+.about-scroll {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+}
+
+.about-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
 .panel {
     -fx-background-color: #181B20;
     -fx-background-radius: 5;

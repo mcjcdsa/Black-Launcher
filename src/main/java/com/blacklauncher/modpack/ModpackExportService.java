@@ -67,37 +67,41 @@ public final class ModpackExportService {
             if (options.isIncludeResourcepacks()) {
                 copyDir(layout.resolve(DirectoryKind.RESOURCEPACKS), overrides.resolve("resourcepacks"));
             }
-            if (options.isIncludeSaves()) {
+            if (options.isIncludeSaves() && !options.isLightUpdatePack()) {
                 copyDir(layout.resolve(DirectoryKind.SAVES), overrides.resolve("saves"));
             }
-            if (options.isIncludeServers()) {
+            if (options.isIncludeServers() && !options.isLightUpdatePack()) {
                 Path servers = layout.resolve(DirectoryKind.SERVERS_DAT);
                 if (Files.isRegularFile(servers)) {
                     Files.createDirectories(overrides);
                     Files.copy(servers, overrides.resolve("servers.dat"), StandardCopyOption.REPLACE_EXISTING);
                 }
             }
-            if (options.isIncludeScreenshots()) {
+            if (options.isIncludeScreenshots() && !options.isLightUpdatePack()) {
                 copyDir(layout.resolve(DirectoryKind.SCREENSHOTS), overrides.resolve("screenshots"));
             }
-            if (options.isIncludeOptions()) {
+            if (options.isIncludeOptions() && !options.isLightUpdatePack()) {
                 Path optionsTxt = layout.resolve(DirectoryKind.OPTIONS_TXT);
                 if (Files.isRegularFile(optionsTxt) && !options.isStripPrivate()) {
                     Files.copy(optionsTxt, overrides.resolve("options.txt"), StandardCopyOption.REPLACE_EXISTING);
                 }
             }
-            // Embed version core (jar/json) for full §7 export.
-            Path versionsOut = staging.resolve("versions").resolve(versionId);
-            copyDir(versionDir, versionsOut);
+            // Embed version core (jar/json) for full §7 export — skip for light update packs.
+            if (!options.isLightUpdatePack()) {
+                Path versionsOut = staging.resolve("versions").resolve(versionId);
+                copyDir(versionDir, versionsOut);
+            }
 
             if (options.isStripPrivate()) {
                 stripPrivate(overrides);
             }
-            if (options.isIncludeJvmArgs() && Validation.isNonBlank(config.getJvmArgs())) {
+            if (!options.isLightUpdatePack()
+                    && options.isIncludeJvmArgs()
+                    && Validation.isNonBlank(config.getJvmArgs())) {
                 Files.writeString(staging.resolve("blacklauncher.jvm.txt"),
                         config.getJvmArgs(), StandardCharsets.UTF_8);
             }
-            if (options.isIncludeLaunchScript()) {
+            if (!options.isLightUpdatePack() && options.isIncludeLaunchScript()) {
                 try {
                     Path script = new LaunchScriptExporter(config).exportTo(
                             versionId, staging.resolve(versionId + "-独立启动脚本.bat"));
@@ -107,8 +111,10 @@ public final class ModpackExportService {
                 }
             }
 
-            // Also embed mods at top-level for offline CF-style consumers.
-            if (options.isIncludeMods() && Files.isDirectory(overrides.resolve("mods"))) {
+            // Also embed mods at top-level for offline CF-style consumers (not needed for light packs).
+            if (!options.isLightUpdatePack()
+                    && options.isIncludeMods()
+                    && Files.isDirectory(overrides.resolve("mods"))) {
                 copyDir(overrides.resolve("mods"), staging.resolve("mods"));
             }
 

@@ -21,3 +21,8 @@ account-secrets.json
 **/account-secrets.json
 .env
 .env.*
+
+# Proprietary — not open-sourced (keep locally; do not push)
+src/private/
+启动器未来的所有实用的功能的未来规划建议文档.txt
+布莱克启动器Fabric模组模板与官方文档内嵌功能开发需求文档.txt

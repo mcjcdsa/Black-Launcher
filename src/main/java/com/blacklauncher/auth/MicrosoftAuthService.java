@@ -259,12 +259,21 @@ public class MicrosoftAuthService {
     }
 
     public void applyToConfig(Session session) {
+        applyToConfig(session, false);
+    }
+
+    /**
+     * @param preserveDisplayName when true (token refresh), keep the user-edited game nickname
+     */
+    public void applyToConfig(Session session, boolean preserveDisplayName) {
         config.setAccountType("msa");
         config.setMinecraftAccessToken(session.minecraftAccessToken());
         config.setMicrosoftRefreshToken(session.refreshToken());
         config.setXboxUserHash(session.xboxUserHash());
         config.setTokenExpiresAt(session.expiresAtEpochMs());
-        config.setPlayerName(session.playerName());
+        if (!preserveDisplayName || !Validation.isNonBlank(config.getPlayerName())) {
+            config.setPlayerName(session.playerName());
+        }
         config.setPlayerUuid(session.playerUuid());
         config.setOnlineModeEnabled(true);
     }

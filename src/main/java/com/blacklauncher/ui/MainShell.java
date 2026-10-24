@@ -8,6 +8,7 @@ import com.blacklauncher.launch.GameLauncher;
 import com.blacklauncher.ui.pages.AboutPage;
 import com.blacklauncher.ui.pages.DownloadPage;
 import com.blacklauncher.ui.pages.HomePage;
+import com.blacklauncher.ui.pages.ModDevPage;
 import com.blacklauncher.ui.pages.NewsPage;
 import com.blacklauncher.ui.pages.OnlinePage;
 import com.blacklauncher.ui.pages.SettingsPage;
@@ -53,6 +54,7 @@ public class MainShell extends BorderPane {
 
     private final HomePage homePage;
     private final DownloadPage downloadPage;
+    private final ModDevPage modDevPage;
     private final SettingsPage settingsPage;
     private final AboutPage aboutPage;
     private final NewsPage newsPage;
@@ -60,6 +62,7 @@ public class MainShell extends BorderPane {
 
     private final ToggleButton homeNav;
     private final ToggleButton downloadNav;
+    private final ToggleButton modDevNav;
     private final ToggleButton onlineNav;
     private final ToggleButton newsNav;
     private final ToggleButton settingsNav;
@@ -83,20 +86,23 @@ public class MainShell extends BorderPane {
         homePage = new HomePage(configManager, database, installedVersionService, gameLauncher, this::setStatus);
         downloadPage = new DownloadPage(configManager, database,
                 () -> homePage.refresh(), homePage::importModpackFiles);
+        modDevPage = new ModDevPage(configManager);
         settingsPage = new SettingsPage(configManager, database, this::getScene, this::onAnimationSettingChanged);
         aboutPage = new AboutPage();
         newsPage = new NewsPage(configManager, database);
 
         homeNav = navToggle("主页", "主");
         downloadNav = navToggle("下载", "下");
+        modDevNav = navToggle("模组开发", "开");
         onlineNav = navToggle("联机", "联");
         newsNav = navToggle("新闻", "新");
         settingsNav = navToggle("设置", "设");
         aboutNav = navToggle("关于", "关");
 
-        onlinePage = new OnlinePage(() -> selectAndShow(homeNav, homePage));
+        onlinePage = new OnlinePage(configManager, database, gameLauncher, this::setStatus);
         wireNav(homeNav, homePage);
         wireNav(downloadNav, downloadPage);
+        wireNav(modDevNav, modDevPage);
         wireNav(onlineNav, onlinePage);
         wireNav(newsNav, newsPage);
         wireNav(settingsNav, settingsPage);
@@ -119,7 +125,7 @@ public class MainShell extends BorderPane {
         applySidebarWidth(false);
         updateSidebarLabels();
         updateFooter();
-        setStatus("就绪", "联机：开发中");
+        setStatus("就绪", onlineStatusText());
         selectAndShow(homeNav, homePage);
     }
 
@@ -224,7 +230,7 @@ public class MainShell extends BorderPane {
         collapseBtn.setMaxWidth(Double.MAX_VALUE);
         collapseBtn.setOnAction(e -> toggleSidebar());
 
-        VBox navButtons = new VBox(2, homeNav, downloadNav, onlineNav, newsNav, settingsNav, aboutNav);
+        VBox navButtons = new VBox(2, homeNav, downloadNav, modDevNav, onlineNav, newsNav, settingsNav, aboutNav);
         VBox.setVgrow(navButtons, Priority.ALWAYS);
 
         sidebarFooter.getStyleClass().add("sidebar-footer");
@@ -272,18 +278,32 @@ public class MainShell extends BorderPane {
                 hp.refresh();
             }
         });
+        String online = onlineStatusText();
         if (page instanceof HomePage) {
-            setStatus("主页", "联机：开发中");
+            setStatus("主页", online);
         } else if (page instanceof DownloadPage) {
-            setStatus("下载", "联机：开发中");
-        } else if (page instanceof OnlinePage) {
-            setStatus("联机大厅（占位）", "联机：开发中");
+            setStatus("下载", online);
+        } else if (page instanceof ModDevPage) {
+            setStatus("模组开发", online);
+        } else if (page instanceof OnlinePage op) {
+            op.onActivated();
+            setStatus("联机 · 局域网联机", online);
         } else if (page instanceof NewsPage) {
-            setStatus("新闻", "联机：开发中");
+            setStatus("新闻", online);
         } else if (page instanceof SettingsPage) {
-            setStatus("设置", "联机：开发中");
+            setStatus("设置", online);
         } else if (page instanceof AboutPage) {
-            setStatus("关于", "联机：开发中");
+            setStatus("关于", online);
+        }
+        updateFooter();
+    }
+
+    private String onlineStatusText() {
+        try {
+            boolean ok = com.blacklauncher.core.net.NetworkMonitor.get().isOnline();
+            return ok ? "联网正常" : "联网失败（仅本地模式）";
+        } catch (Exception e) {
+            return "联网状态未知";
         }
     }
 
@@ -311,7 +331,7 @@ public class MainShell extends BorderPane {
 
     private void updateSidebarLabels() {
         for (ToggleButton btn : new ToggleButton[]{
-                homeNav, downloadNav, onlineNav, newsNav, settingsNav, aboutNav}) {
+                homeNav, downloadNav, modDevNav, onlineNav, newsNav, settingsNav, aboutNav}) {
             Object data = btn.getUserData();
             if (data instanceof String[] texts && texts.length == 2) {
                 btn.setText(collapsed ? texts[1] : texts[0]);
@@ -321,9 +341,9 @@ public class MainShell extends BorderPane {
     }
 
     private void updateFooter() {
-        String online = "开发中";
+        String online = onlineStatusText();
         sidebarFooter.setText(collapsed
                 ? "v" + AppInfo.VERSION
-                : AppInfo.NAME + "\nv" + AppInfo.VERSION + "\n联机：" + online);
+                : AppInfo.NAME + "\nv" + AppInfo.VERSION + "\n" + online);
     }
 }

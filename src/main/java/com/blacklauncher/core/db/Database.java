@@ -190,6 +190,14 @@ public class Database implements AutoCloseable {
         }
     }
 
+    public void deleteInstalledVersion(String id) throws Exception {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "DELETE FROM installed_versions WHERE id = ?")) {
+            ps.setString(1, id);
+            ps.executeUpdate();
+        }
+    }
+
     public List<InstalledVersionRecord> listInstalledVersions() throws Exception {
         List<InstalledVersionRecord> list = new ArrayList<>();
         String sql = "SELECT id, type, installed_at, last_launched_at FROM installed_versions ORDER BY installed_at DESC";

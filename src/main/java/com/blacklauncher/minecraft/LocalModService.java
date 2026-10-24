@@ -110,6 +110,115 @@ public final class LocalModService {
         }
     }
 
+    /**
+     * Enable or disable a mod by renaming with a {@code .disabled} suffix.
+     * Disabling {@code foo.jar} → {@code foo.jar.disabled}; enabling strips {@code .disabled}.
+     */
+    public Path setEnabled(Path file, boolean enabled) throws LauncherException {
+        if (file == null || !Files.isRegularFile(file)) {
+            throw new LauncherException("Mod 文件不存在");
+        }
+        String name = file.getFileName().toString();
+        String lower = name.toLowerCase(Locale.ROOT);
+        String targetName;
+        if (enabled) {
+            if (!lower.endsWith(".disabled")) {
+                return file;
+            }
+            targetName = name.substring(0, name.length() - ".disabled".length());
+            if (targetName.isBlank()) {
+                throw new LauncherException("无法启用：文件名无效");
+            }
+        } else {
+            if (lower.endsWith(".disabled")) {
+                return file;
+            }
+            if (!lower.endsWith(".jar") && !lower.endsWith(".zip")) {
+                throw new LauncherException("仅支持禁用 .jar / .zip 模组文件");
+            }
+            targetName = name + ".disabled";
+        }
+        Path dest = file.getParent().resolve(targetName);
+        if (Files.exists(dest) && !dest.equals(file)) {
+            throw new LauncherException("目标文件已存在: " + targetName);
+        }
+        try {
+            GameProcessGuard.get().requireWritable(DirectoryKind.MODS);
+            Files.move(file, dest);
+            return dest;
+        } catch (LauncherException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new LauncherException((enabled ? "启用" : "禁用") + " Mod 失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Detect likely conflicts among enabled mods (duplicate stems / multiple fabric-api).
+     */
+    public List<String> detectConflicts(List<LocalModEntry> mods) {
+        List<String> tips = new ArrayList<>();
+        if (mods == null || mods.isEmpty()) {
+            return tips;
+        }
+        List<LocalModEntry> enabled = mods.stream()
+                .filter(m -> m != null && m.status() != LocalModEntry.Status.DISABLED)
+                .filter(m -> {
+                    String n = m.fileName().toLowerCase(Locale.ROOT);
+                    return n.endsWith(".jar") || n.endsWith(".zip");
+                })
+                .collect(Collectors.toList());
+
+        java.util.Map<String, List<LocalModEntry>> byKey = new java.util.LinkedHashMap<>();
+        for (LocalModEntry m : enabled) {
+            String key = normalizeModKey(m.fileName());
+            if (key.isBlank()) {
+                continue;
+            }
+            byKey.computeIfAbsent(key, k -> new ArrayList<>()).add(m);
+        }
+        for (var entry : byKey.entrySet()) {
+            List<LocalModEntry> group = entry.getValue();
+            if (group.size() < 2) {
+                continue;
+            }
+            String names = group.stream().map(LocalModEntry::fileName).collect(Collectors.joining("、"));
+            tips.add("疑似同模组多版本（" + entry.getKey() + "）：" + names);
+        }
+
+        List<LocalModEntry> fabricApis = enabled.stream()
+                .filter(m -> m.fileName().toLowerCase(Locale.ROOT).contains("fabric-api"))
+                .collect(Collectors.toList());
+        if (fabricApis.size() > 1) {
+            String names = fabricApis.stream().map(LocalModEntry::fileName).collect(Collectors.joining("、"));
+            tips.add("同时启用了多个 Fabric API：" + names);
+        }
+        return tips;
+    }
+
+    /**
+     * Strip {@code .jar}/{@code .disabled} and trailing version-like suffixes for crude grouping.
+     */
+    static String normalizeModKey(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return "";
+        }
+        String n = fileName.toLowerCase(Locale.ROOT).trim();
+        if (n.endsWith(".disabled")) {
+            n = n.substring(0, n.length() - ".disabled".length());
+        }
+        if (n.endsWith(".jar") || n.endsWith(".zip")) {
+            n = n.substring(0, n.length() - 4);
+        }
+        // strip +build / +hash suffixes
+        n = n.replaceAll("\\+[a-z0-9._-]+$", "");
+        // strip trailing -x.y.z / _x.y.z / -mc1.20.1 / -1.20.1-...
+        n = n.replaceAll("[-_]\\d+(?:\\.\\d+)+(?:[-+][a-z0-9._-]*)*$", "");
+        // strip remaining trailing -digit...
+        n = n.replaceAll("[-_]\\d[\\w.-]*$", "");
+        return n.trim();
+    }
+
     private static LocalModEntry toEntry(Path file) {
         String name = file.getFileName().toString();
         String lower = name.toLowerCase(Locale.ROOT);

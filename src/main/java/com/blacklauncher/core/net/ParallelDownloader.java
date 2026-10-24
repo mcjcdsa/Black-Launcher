@@ -34,7 +34,7 @@ public class ParallelDownloader {
                             int concurrency,
                             AtomicBoolean cancelled,
                             BiConsumer<Integer, Integer> progress) throws LauncherException {
-        downloadAll(tasks, concurrency, cancelled, progress, null);
+        downloadAll(tasks, concurrency, cancelled, progress, null, null);
     }
 
     public void downloadAll(List<DownloadTask> tasks,
@@ -42,6 +42,18 @@ public class ParallelDownloader {
                             AtomicBoolean cancelled,
                             BiConsumer<Integer, Integer> progress,
                             LongConsumer bytesListener) throws LauncherException {
+        downloadAll(tasks, concurrency, cancelled, progress, bytesListener, null);
+    }
+
+    /**
+     * @param fileProgress optional (fileName, doneBytes, totalBytes) for the active dependency file
+     */
+    public void downloadAll(List<DownloadTask> tasks,
+                            int concurrency,
+                            AtomicBoolean cancelled,
+                            BiConsumer<Integer, Integer> progress,
+                            LongConsumer bytesListener,
+                            FileProgressListener fileProgress) throws LauncherException {
         if (tasks == null || tasks.isEmpty()) {
             return;
         }
@@ -72,15 +84,19 @@ public class ParallelDownloader {
                         return;
                     }
                     try {
+                        String fileName = task.target() == null ? ""
+                                : task.target().getFileName().toString();
                         AtomicLong lastReported = new AtomicLong(0);
                         BiConsumer<Long, Long> byteProgress = (done, fileTotal) -> {
-                            if (bytesListener == null) {
-                                return;
+                            if (bytesListener != null) {
+                                long prev = lastReported.getAndSet(done);
+                                long delta = done - prev;
+                                if (delta > 0) {
+                                    bytesListener.accept(delta);
+                                }
                             }
-                            long prev = lastReported.getAndSet(done);
-                            long delta = done - prev;
-                            if (delta > 0) {
-                                bytesListener.accept(delta);
+                            if (fileProgress != null) {
+                                fileProgress.onFile(fileName, done, fileTotal == null ? -1L : fileTotal);
                             }
                         };
                         try {
@@ -158,5 +174,10 @@ public class ParallelDownloader {
             }
             throw new LauncherException("并行下载失败: " + error.getMessage(), error);
         }
+    }
+
+    @FunctionalInterface
+    public interface FileProgressListener {
+        void onFile(String fileName, long doneBytes, long totalBytes);
     }
 }

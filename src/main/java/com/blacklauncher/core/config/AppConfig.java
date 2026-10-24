@@ -1,5 +1,8 @@
 package com.blacklauncher.core.config;
 
+import com.blacklauncher.moddev.ModDevConfig;
+import com.blacklauncher.online.LanConfig;
+
 /**
  * Persistent launcher configuration.
  */
@@ -48,6 +51,22 @@ public class AppConfig {
     private String minecraftAccessToken = "";
     private String xboxUserHash = "";
     private long tokenExpiresAt;
+
+    /** LAN multiplayer (UDP discovery / helper bridge / defaults). */
+    private LanConfig lan = new LanConfig();
+
+    /** Fabric mod template generator + docs viewer preferences. */
+    private ModDevConfig modDev = new ModDevConfig();
+
+    /** True after the first-run wizard completed (Gson default false). */
+    private boolean firstRunWizardDone;
+
+    /** Backup all valid worlds for the selected version before launching. */
+    private boolean backupBeforeLaunch;
+    /** Backup all valid worlds after the game process exits. */
+    private boolean backupAfterExit;
+    /** Max backup folders kept per world (clamped 1..30). */
+    private int backupKeepCount = 5;
 
     public String getLanguage() {
         return language;
@@ -303,5 +322,59 @@ public class AppConfig {
 
     public void setTokenExpiresAt(long tokenExpiresAt) {
         this.tokenExpiresAt = tokenExpiresAt;
+    }
+
+    public LanConfig getLan() {
+        if (lan == null) {
+            lan = new LanConfig();
+        }
+        return lan;
+    }
+
+    public void setLan(LanConfig lan) {
+        this.lan = lan == null ? new LanConfig() : lan;
+    }
+
+    public ModDevConfig getModDev() {
+        if (modDev == null) {
+            modDev = new ModDevConfig();
+        }
+        return modDev;
+    }
+
+    public void setModDev(ModDevConfig modDev) {
+        this.modDev = modDev == null ? new ModDevConfig() : modDev;
+    }
+
+    public boolean isFirstRunWizardDone() {
+        return firstRunWizardDone;
+    }
+
+    public void setFirstRunWizardDone(boolean firstRunWizardDone) {
+        this.firstRunWizardDone = firstRunWizardDone;
+    }
+
+    public boolean isBackupBeforeLaunch() {
+        return backupBeforeLaunch;
+    }
+
+    public void setBackupBeforeLaunch(boolean backupBeforeLaunch) {
+        this.backupBeforeLaunch = backupBeforeLaunch;
+    }
+
+    public boolean isBackupAfterExit() {
+        return backupAfterExit;
+    }
+
+    public void setBackupAfterExit(boolean backupAfterExit) {
+        this.backupAfterExit = backupAfterExit;
+    }
+
+    public int getBackupKeepCount() {
+        return backupKeepCount;
+    }
+
+    public void setBackupKeepCount(int backupKeepCount) {
+        this.backupKeepCount = backupKeepCount;
     }
 }

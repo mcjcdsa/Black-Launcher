@@ -13,6 +13,25 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+/**
+ * Optional proprietary LAN / online sources (not published to the public GitHub tree).
+ * Present locally as {@code src/private/java}; open-source clones omit this directory.
+ */
+val privateJava = file("src/private/java")
+val privateTestJava = file("src/private/test/java")
+sourceSets {
+    main {
+        if (privateJava.isDirectory) {
+            java.srcDir(privateJava)
+        }
+    }
+    test {
+        if (privateTestJava.isDirectory) {
+            java.srcDir(privateTestJava)
+        }
+    }
+}
+
 repositories {
     maven { url = uri("https://maven.aliyun.com/repository/public") }
     maven { url = uri("https://maven.aliyun.com/repository/central") }
@@ -30,6 +49,8 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.46.1.3")
     implementation("org.slf4j:slf4j-api:2.0.16")
     implementation("ch.qos.logback:logback-classic:1.5.8")
+    implementation("net.java.dev.jna:jna:5.14.0")
+    implementation("net.java.dev.jna:jna-platform:5.14.0")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
 }

@@ -163,6 +163,9 @@ public class GameDownloadService {
         VersionJson.Artifact clientArt = versionJson.getDownloads().getClient();
         Path jar = versionDir.resolve(versionJson.getId() + ".jar");
         report(sink, "下载客户端...", 0.08);
+        if (sink != null) {
+            sink.mainFile("下载客户端 " + jar.getFileName() + "...", 0);
+        }
         AtomicLong last = new AtomicLong(0);
         downloader.download(clientArt.getUrl(), jar, clientArt.getSha1(), clientArt.getSize(),
                 (done, total) -> {
@@ -171,9 +174,16 @@ public class GameDownloadService {
                     if (delta > 0 && sink != null) {
                         sink.addBytes(delta);
                     }
-                    double p = total > 0 ? 0.08 + 0.12 * (done / (double) total) : 0.1;
+                    double fileP = total > 0 ? done / (double) total : 0;
+                    double p = 0.08 + 0.12 * fileP;
+                    if (sink != null) {
+                        sink.mainFile("下载客户端 " + jar.getFileName() + "...", fileP);
+                    }
                     report(sink, "下载客户端...", p);
                 });
+        if (sink != null) {
+            sink.mainFile("客户端已就绪", 1.0);
+        }
     }
 
     private void downloadLibraries(VersionJson versionJson, DownloadProgressSink sink)
@@ -224,11 +234,20 @@ public class GameDownloadService {
 
         report(sink, "并行下载依赖库（" + threads + " 线程）...", 0.22);
         parallelDownloader.downloadAll(tasks, threads, cancelled, (done, total) -> {
-            double p = 0.22 + 0.30 * (done / (double) Math.max(total, 1));
+            double batch = done / (double) Math.max(total, 1);
+            double p = 0.22 + 0.30 * batch;
             report(sink, "依赖库 " + done + "/" + total, p);
+            if (sink != null) {
+                sink.dependency("依赖库 " + done + "/" + total, batch);
+            }
         }, bytes -> {
             if (sink != null) {
                 sink.addBytes(bytes);
+            }
+        }, (fileName, done, total) -> {
+            if (sink != null) {
+                double fp = total > 0 ? done / (double) total : 0;
+                sink.dependency(fileName, fp);
             }
         });
     }
@@ -283,11 +302,20 @@ public class GameDownloadService {
 
         report(sink, "并行下载资源（" + threads + " 线程，共 " + tasks.size() + "）...", 0.58);
         parallelDownloader.downloadAll(tasks, threads, cancelled, (done, total) -> {
-            double p = 0.58 + 0.32 * (done / (double) Math.max(total, 1));
+            double batch = done / (double) Math.max(total, 1);
+            double p = 0.58 + 0.32 * batch;
             report(sink, "资源 " + done + "/" + total, p);
+            if (sink != null) {
+                sink.dependency("资源 " + done + "/" + total, batch);
+            }
         }, bytes -> {
             if (sink != null) {
                 sink.addBytes(bytes);
+            }
+        }, (fileName, done, total) -> {
+            if (sink != null) {
+                double fp = total > 0 ? done / (double) total : 0;
+                sink.dependency(fileName, fp);
             }
         });
     }

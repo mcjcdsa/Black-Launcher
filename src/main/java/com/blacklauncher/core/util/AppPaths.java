@@ -180,6 +180,16 @@ public final class AppPaths {
         return home().resolve("LaunchScript");
     }
 
+    /** Default working directory for generated Fabric mod projects. */
+    public static Path modDevDir() {
+        return home().resolve("mod-dev");
+    }
+
+    /** Local cache of FabricMC/fabric-docs Markdown. */
+    public static Path fabricDocsCacheDir() {
+        return home().resolve("cache").resolve("fabric-docs");
+    }
+
     public static void ensureDirectories() {
         try {
             if (launcherHome == null) {
@@ -197,6 +207,8 @@ public final class AppPaths {
             Files.createDirectories(downloadsTempDir());
             Files.createDirectories(modpacksDir());
             Files.createDirectories(launchScriptsDir());
+            Files.createDirectories(modDevDir());
+            Files.createDirectories(fabricDocsCacheDir());
         } catch (Exception e) {
             throw new IllegalStateException("无法创建应用数据目录: " + home(), e);
         }

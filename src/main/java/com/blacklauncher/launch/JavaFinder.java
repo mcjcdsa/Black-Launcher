@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -19,7 +20,35 @@ import java.util.Set;
  */
 public final class JavaFinder {
 
+    public record JavaInstall(String executable, int major, boolean sixtyFourBit, String versionLine) {
+    }
+
     private JavaFinder() {
+    }
+
+    /**
+     * Discovers candidate Java installs and probes major / arch / version line.
+     * Sorted by major version descending.
+     */
+    public static List<JavaInstall> discoverInstalls() {
+        List<JavaInstall> out = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String candidate : discoverCandidates()) {
+            if (!seen.add(candidate)) {
+                continue;
+            }
+            if (!Files.isRegularFile(Paths.get(candidate))) {
+                continue;
+            }
+            int major = JavaVersionProbe.probeMajor(candidate);
+            boolean sixtyFour = JavaVersionProbe.is64Bit(candidate);
+            String line = probeVersion(candidate);
+            out.add(new JavaInstall(candidate, major, sixtyFour, line == null ? "" : line));
+        }
+        out.sort(Comparator.comparingInt(JavaInstall::major).reversed()
+                .thenComparing((JavaInstall j) -> !j.sixtyFourBit())
+                .thenComparing(JavaInstall::executable));
+        return out;
     }
 
     public static String resolveJavaExecutable(String configuredPath) {

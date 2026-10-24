@@ -7,10 +7,13 @@ import com.blacklauncher.core.exception.LauncherException;
 import com.blacklauncher.core.net.DownloadCancelledException;
 import com.blacklauncher.core.net.DownloadControl;
 import com.blacklauncher.core.net.DownloadProgressSink;
+import com.blacklauncher.core.net.DownloadSource;
+import com.blacklauncher.core.net.MirrorSpeedTester;
 import com.blacklauncher.core.net.UserPausedException;
 import com.blacklauncher.core.util.McVersionUtil;
 import com.blacklauncher.core.util.Validation;
 import com.blacklauncher.download.InstancePaths;
+import com.blacklauncher.download.LoaderInstallChoice;
 import com.blacklauncher.download.ModLoader;
 import com.blacklauncher.download.ModLoaderInstallService;
 import com.blacklauncher.download.VersionManifestService;
@@ -31,7 +34,9 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
@@ -87,6 +92,9 @@ public class DownloadPage extends BorderPane {
     private final Label progressLabel = new Label("\u5c31\u7eea");
     private final Label progressPercent = new Label("0%");
     private final Label progressSpeed = new Label("0 B/s");
+    private final Label mainProgressLabel = new Label("\u4e3b\u6587\u4ef6 0%");
+    private final Label depProgressLabel = new Label("\u4f9d\u8d56 0%");
+    private final Label depFileLabel = new Label("");
     private final DownloadProgressSink progressSink = new DownloadProgressSink(this::applyProgressSnapshot);
     private List<VersionManifest.VersionEntry> allVersions = List.of();
     private ModLoaderInstallService activeDownload;
@@ -97,12 +105,14 @@ public class DownloadPage extends BorderPane {
 
     private final TableView<ModrinthClient.ModProject> modList = new TableView<>();
     private final TableView<ModrinthClient.ModProject> shaderList = new TableView<>();
+    private final TableView<ModrinthClient.ModProject> resourcePackList = new TableView<>();
     private final TableView<ModrinthClient.ModProject> packList = new TableView<>();
     private final ListView<String> skinList = new ListView<>();
     private final ImageView skinPreview = new ImageView();
 
     private final Label modStatus = statusLabel("\u6b63\u5728\u52a0\u8f7d\u70ed\u95e8 Mod...");
     private final Label shaderStatus = statusLabel("\u6b63\u5728\u52a0\u8f7d\u70ed\u95e8\u5149\u5f71...");
+    private final Label resourcePackStatus = statusLabel("\u6b63\u5728\u52a0\u8f7d\u70ed\u95e8\u8d44\u6e90\u5305...");
     private final Label packStatus = statusLabel("\u6b63\u5728\u52a0\u8f7d\u70ed\u95e8\u6574\u5408\u5305...");
     private final Label skinStatus = statusLabel("\u6b63\u5728\u52a0\u8f7d\u76ae\u80a4\u5217\u8868...");
 
@@ -113,11 +123,15 @@ public class DownloadPage extends BorderPane {
     private final TextField shaderQuery = new TextField();
     private final TextField shaderGameVersion = new TextField();
 
+    private final TextField resourcePackQuery = new TextField();
+    private final TextField resourcePackGameVersion = new TextField();
+
     private final TextField packQuery = new TextField();
     private final TextField packGameVersion = new TextField();
 
     private final AtomicBoolean modsLoaded = new AtomicBoolean(false);
     private final AtomicBoolean shadersLoaded = new AtomicBoolean(false);
+    private final AtomicBoolean resourcePacksLoaded = new AtomicBoolean(false);
     private final AtomicBoolean packsLoaded = new AtomicBoolean(false);
 
     private final StackPane pageStack = new StackPane();
@@ -149,6 +163,7 @@ public class DownloadPage extends BorderPane {
                 gameTab(),
                 modTab(),
                 shaderTab(),
+                resourcePackTab(),
                 packTab(),
                 skinTab()
         );
@@ -161,15 +176,21 @@ public class DownloadPage extends BorderPane {
         progressLabel.getStyleClass().add("muted");
         progressPercent.getStyleClass().add("progress-meta");
         progressSpeed.getStyleClass().add("progress-meta");
+        mainProgressLabel.getStyleClass().add("progress-meta");
+        depProgressLabel.getStyleClass().add("progress-meta");
+        depFileLabel.getStyleClass().add("muted");
         progressPercent.setMinWidth(56);
         progressSpeed.setMinWidth(90);
+        mainProgressLabel.setMinWidth(88);
+        depProgressLabel.setMinWidth(72);
+        depFileLabel.setMaxWidth(360);
 
-        HBox progressMeta = new HBox(16, progressPercent, progressSpeed);
+        HBox progressMeta = new HBox(16, progressPercent, progressSpeed, mainProgressLabel, depProgressLabel);
         progressMeta.setAlignment(Pos.CENTER_LEFT);
         HBox progressRow = new HBox(12, progressBar, progressMeta);
         progressRow.setAlignment(Pos.CENTER_LEFT);
 
-        listRoot = new VBox(8, title, tabs, progressLabel, progressRow);
+        listRoot = new VBox(8, title, tabs, progressLabel, progressRow, depFileLabel);
         VBox.setVgrow(tabs, Priority.ALWAYS);
 
         modDetailPane = new ModDetailPane(
@@ -191,6 +212,7 @@ public class DownloadPage extends BorderPane {
         // Eagerly load catalogs so tabs are never blank on first open.
         loadPopularProjects("mod", null, preferredLoader(), modList, modStatus, modsLoaded);
         loadPopularProjects("shader", null, null, shaderList, shaderStatus, shadersLoaded);
+        loadPopularProjects("resourcepack", null, null, resourcePackList, resourcePackStatus, resourcePacksLoaded);
         loadPopularProjects("modpack", null, null, packList, packStatus, packsLoaded);
     }
 
@@ -290,8 +312,14 @@ public class DownloadPage extends BorderPane {
             }
         });
 
-        Button repair = new Button("\u68c0\u6d4b/\u4fee\u590d");
-        repair.setOnAction(e -> repairSelectedVersion());
+        Button inspectOnly = new Button("\u4ec5\u6821\u9a8c");
+        inspectOnly.setOnAction(e -> inspectSelectedVersion());
+
+        Button prepareRepair = new Button("\u8865\u5168\u7f3a\u5931");
+        prepareRepair.setOnAction(e -> prepareRepairSelectedVersion());
+
+        Button mirrorSpeed = new Button("\u955c\u50cf\u6d4b\u901f");
+        mirrorSpeed.setOnAction(e -> runMirrorSpeedTest());
 
         configureVersionTable(versionList);
         versionList.setOnMouseClicked(ev -> {
@@ -307,7 +335,7 @@ public class DownloadPage extends BorderPane {
         tip.getStyleClass().add("muted");
 
         HBox tools = new HBox(10, new Label("\u7c7b\u578b"), typeFilter, versionSearch, reload, download,
-                pauseButton, resumeButton, cancel, repair);
+                pauseButton, resumeButton, cancel, inspectOnly, prepareRepair, mirrorSpeed);
         tools.setAlignment(Pos.CENTER_LEFT);
         VBox box = new VBox(10, tip, tools, versionList);
         VBox.setVgrow(box, Priority.ALWAYS);
@@ -421,6 +449,37 @@ public class DownloadPage extends BorderPane {
         VBox box = new VBox(10, tools, shaderStatus, shaderList);
         VBox.setVgrow(shaderList, Priority.ALWAYS);
         return new Tab("\u5149\u5f71", box);
+    }
+
+    private Tab resourcePackTab() {
+        resourcePackQuery.setPromptText("搜索资源包（留空显示热门）");
+        resourcePackGameVersion.setPromptText("游戏版本");
+        HBox.setHgrow(resourcePackQuery, Priority.ALWAYS);
+
+        Button search = new Button("搜索");
+        search.setOnAction(e -> {
+            resourcePacksLoaded.set(false);
+            searchProjects(resourcePackQuery.getText(), resourcePackGameVersion.getText(), null,
+                    "resourcepack", resourcePackList, resourcePackStatus, resourcePacksLoaded);
+        });
+
+        Button refresh = new Button("刷新热门");
+        refresh.setOnAction(e -> {
+            resourcePackQuery.clear();
+            resourcePacksLoaded.set(false);
+            loadPopularProjects("resourcepack", resourcePackGameVersion.getText(), null,
+                    resourcePackList, resourcePackStatus, resourcePacksLoaded);
+        });
+
+        Button install = new Button("下载并安装");
+        install.getStyleClass().addAll("button", "primary");
+        install.setOnAction(e -> installSelectedResourcePack());
+
+        configureProjectTable(resourcePackList);
+        HBox tools = new HBox(8, resourcePackQuery, resourcePackGameVersion, search, refresh, install);
+        VBox box = new VBox(10, tools, resourcePackStatus, resourcePackList);
+        VBox.setVgrow(resourcePackList, Priority.ALWAYS);
+        return new Tab("资源包", box);
     }
 
     private Tab packTab() {
@@ -696,12 +755,13 @@ public class DownloadPage extends BorderPane {
             return;
         }
 
-        Optional<ModLoader> choice = LoaderChoiceDialog.show(window(), selected.getId());
+        Optional<LoaderInstallChoice> choice = LoaderChoiceDialog.show(window(), selected.getId());
         if (choice.isEmpty()) {
             setProgress("\u5df2\u53d6\u6d88\u4e0b\u8f7d", 0);
             return;
         }
-        ModLoader loader = choice.get();
+        LoaderInstallChoice installChoice = choice.get();
+        ModLoader loader = installChoice.loaderOrVanilla();
 
         ModLoaderInstallService service = new ModLoaderInstallService(configManager.getConfig(), database);
         activeDownload = service;
@@ -710,7 +770,7 @@ public class DownloadPage extends BorderPane {
         progressSink.reset("\u51c6\u5907\u4e0b\u8f7d " + selected.getId() + "\uff08" + loader.displayName() + "\uff09...");
         worker.submit(() -> {
             try {
-                String installedId = service.downloadWithLoader(selected, loader, progressSink);
+                String installedId = service.downloadWithLoader(selected, installChoice, progressSink);
                 configManager.getConfig().setSelectedVersion(installedId);
                 configManager.save();
                 String base = McVersionUtil.extractBaseVersion(installedId);
@@ -745,35 +805,133 @@ public class DownloadPage extends BorderPane {
         });
     }
 
-    private void repairSelectedVersion() {
+    private String resolveSelectedVersionId() {
         VersionManifest.VersionEntry selected = versionList.getSelectionModel().getSelectedItem();
-        String versionId = selected != null
-                ? selected.getId()
-                : configManager.getConfig().getSelectedVersion();
+        if (selected != null && Validation.isNonBlank(selected.getId())) {
+            return selected.getId();
+        }
+        return configManager.getConfig().getSelectedVersion();
+    }
+
+    /** 仅校验：inspect only，不 prepareRepair。 */
+    private void inspectSelectedVersion() {
+        String versionId = resolveSelectedVersionId();
         if (!Validation.isNonBlank(versionId)) {
-            ExceptionHandler.showInfo("\u63d0\u793a", "\u8bf7\u5148\u9009\u62e9\u8981\u68c0\u6d4b\u7684\u7248\u672c");
+            ExceptionHandler.showInfo("提示", "请先选择要校验的版本");
             return;
         }
-        setProgress("\u6b63\u5728\u68c0\u6d4b\u7248\u672c\u5b8c\u6574\u6027: " + versionId, 0.1);
+        setProgress("正在校验版本完整性: " + versionId, 0.1);
+        worker.submit(() -> {
+            try {
+                VersionRepairService.RepairReport report = new VersionRepairService().inspect(versionId);
+                if (report.healthy()) {
+                    setProgress("版本完好: " + versionId, 1.0);
+                    Platform.runLater(() ->
+                            ExceptionHandler.showInfo("校验结果", versionId + "\n完整性正常"));
+                    return;
+                }
+                String issues = String.join("\n• ", report.issues());
+                setProgress("发现完整性问题: " + versionId, 1.0);
+                Platform.runLater(() ->
+                        ExceptionHandler.showInfo("校验结果",
+                                versionId + "\n• " + issues + "\n\n可使用「补全缺失」清理损坏文件后重新下载。"));
+            } catch (Exception e) {
+                ExceptionHandler.handle("版本校验失败", e);
+            }
+        });
+    }
+
+    /** 补全缺失：inspect；不健康则确认后 prepareRepair。 */
+    private void prepareRepairSelectedVersion() {
+        String versionId = resolveSelectedVersionId();
+        if (!Validation.isNonBlank(versionId)) {
+            ExceptionHandler.showInfo("提示", "请先选择要补全的版本");
+            return;
+        }
+        setProgress("正在检测版本完整性: " + versionId, 0.1);
         worker.submit(() -> {
             try {
                 VersionRepairService repairService = new VersionRepairService();
                 VersionRepairService.RepairReport report = repairService.inspect(versionId);
                 if (report.healthy()) {
-                    setProgress("\u7248\u672c\u5b8c\u597d: " + versionId, 1.0);
+                    setProgress("版本完好: " + versionId, 1.0);
                     Platform.runLater(() ->
-                            ExceptionHandler.showInfo("\u68c0\u6d4b\u7ed3\u679c", versionId + "\n\u5b8c\u6574\u6027\u6b63\u5e38"));
+                            ExceptionHandler.showInfo("补全缺失", versionId + "\n完整性正常，无需补全"));
                     return;
                 }
-                String issues = String.join("\n\u2022 ", report.issues());
+                String issues = String.join("\n• ", report.issues());
                 Platform.runLater(() -> {
-                    ExceptionHandler.showInfo("\u53d1\u73b0\u95ee\u9898",
-                            versionId + "\n\u2022 " + issues + "\n\n\u5c06\u6e05\u7406\u635f\u574f\u6587\u4ef6\u4ee5\u4fbf\u91cd\u65b0\u4e0b\u8f7d\uff08\u4fdd\u7559\u65ad\u70b9 .part\uff09");
+                    Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+                    confirm.setTitle("补全缺失");
+                    confirm.setHeaderText(versionId + " 发现以下问题");
+                    confirm.setContentText("• " + issues
+                            + "\n\n将清理损坏文件以便重新下载（保留断点 .part）。是否继续？");
+                    if (window() != null) {
+                        confirm.initOwner(window());
+                    }
+                    var result = confirm.showAndWait();
+                    if (result.isEmpty() || result.get() != ButtonType.OK) {
+                        setProgress("已取消补全: " + versionId, 0);
+                        return;
+                    }
+                    worker.submit(() -> {
+                        try {
+                            repairService.prepareRepair(versionId);
+                            setProgress("已准备修复，请重新下载: " + versionId, 1.0);
+                            Platform.runLater(() ->
+                                    ExceptionHandler.showInfo("已准备补全",
+                                            versionId + "\n损坏文件已清理，请重新下载该版本以补全缺失内容。"));
+                        } catch (Exception e) {
+                            ExceptionHandler.handle("准备补全失败", e);
+                        }
+                    });
                 });
-                repairService.prepareRepair(versionId);
-                setProgress("\u5df2\u51c6\u5907\u4fee\u590d\uff0c\u8bf7\u91cd\u65b0\u4e0b\u8f7d: " + versionId, 1.0);
             } catch (Exception e) {
-                ExceptionHandler.handle("\u7248\u672c\u4fee\u590d\u5931\u8d25", e);
+                ExceptionHandler.handle("版本补全失败", e);
+            }
+        });
+    }
+
+    private void runMirrorSpeedTest() {
+        setProgress("正在镜像测速…", 0.05);
+        worker.submit(() -> {
+            try {
+                MirrorSpeedTester tester = new MirrorSpeedTester();
+                List<MirrorSpeedTester.Result> results = tester.testAll();
+                DownloadSource fastest = tester.recommendFastest();
+                StringBuilder sb = new StringBuilder();
+                for (MirrorSpeedTester.Result r : results) {
+                    sb.append(r.source().displayName())
+                            .append("：")
+                            .append(r.ok() ? r.latencyMs() + " ms" : "失败")
+                            .append("（")
+                            .append(r.detail() == null ? "" : r.detail())
+                            .append("）\n");
+                }
+                sb.append("\n推荐最快：").append(fastest.displayName());
+                String body = sb.toString();
+                Platform.runLater(() -> {
+                    setProgress("镜像测速完成", 1.0);
+                    Alert ask = new Alert(Alert.AlertType.CONFIRMATION);
+                    ask.setTitle("镜像测速");
+                    ask.setHeaderText("测速结果");
+                    ask.setContentText(body + "\n\n是否将下载源切换为「" + fastest.displayName() + "」？");
+                    if (window() != null) {
+                        ask.initOwner(window());
+                    }
+                    var result = ask.showAndWait();
+                    if (result.isPresent() && result.get() == ButtonType.OK) {
+                        try {
+                            configManager.getConfig().setDownloadSource(fastest.id());
+                            configManager.save();
+                            ExceptionHandler.showInfo("已切换下载源", fastest.displayName());
+                        } catch (Exception e) {
+                            ExceptionHandler.handle("保存下载源失败", e);
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                ExceptionHandler.handle("镜像测速失败", e);
             }
         });
     }
@@ -887,8 +1045,9 @@ public class DownloadPage extends BorderPane {
                                     if (delta > 0) {
                                         progressSink.addBytes(delta);
                                     }
-                                    progressSink.status("\u4e0b\u8f7d Mod...",
-                                            total > 0 ? 0.05 + 0.9 * done / total : 0.5);
+                                    double fp = total > 0 ? done / (double) total : 0.5;
+                                    progressSink.mainFile("\u4e0b\u8f7d Mod: " + selected.title(), fp);
+                                    progressSink.status("\u4e0b\u8f7d Mod...", 0.05 + 0.9 * fp);
                                 });
                 progressSink.complete("Mod \u5df2\u5b89\u88c5: " + path.getFileName());
                 Platform.runLater(() -> ExceptionHandler.showInfo("\u5b8c\u6210",
@@ -939,14 +1098,67 @@ public class DownloadPage extends BorderPane {
                                     if (delta > 0) {
                                         progressSink.addBytes(delta);
                                     }
-                                    progressSink.status("\u4e0b\u8f7d\u5149\u5f71...",
-                                            total > 0 ? 0.05 + 0.9 * done / total : 0.5);
+                                    double fp = total > 0 ? done / (double) total : 0.5;
+                                    progressSink.mainFile("\u4e0b\u8f7d\u5149\u5f71: " + selected.title(), fp);
+                                    progressSink.status("\u4e0b\u8f7d\u5149\u5f71...", 0.05 + 0.9 * fp);
                                 });
                 progressSink.complete("\u5149\u5f71\u5df2\u5b89\u88c5: " + path.getFileName());
                 Platform.runLater(() -> ExceptionHandler.showInfo("\u5b8c\u6210",
                         "\u5df2\u5b89\u88c5\u5230\uff1a\n" + path.toAbsolutePath()));
             } catch (Exception e) {
                 ExceptionHandler.handle("\u5b89\u88c5\u5149\u5f71\u5931\u8d25", e);
+            }
+        });
+    }
+
+    private void installSelectedResourcePack() {
+        ModrinthClient.ModProject selected = resourcePackList.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            ExceptionHandler.showInfo("提示", "请先选择资源包");
+            return;
+        }
+        String mcVersion = resolveMcVersion(resourcePackGameVersion.getText());
+        Optional<InstallLocationDialog.Result> choice = InstallLocationDialog.show(
+                window(),
+                configManager.getConfig(),
+                selected.title(),
+                InstancePaths.ContentFolder.RESOURCEPACKS,
+                mcVersion,
+                null
+        );
+        if (choice.isEmpty()) {
+            setProgress("已取消资源包安装", 0);
+            return;
+        }
+        InstallLocationDialog.Result location = choice.get();
+        configManager.getConfig().setSelectedVersion(location.versionId());
+        try {
+            configManager.save();
+        } catch (Exception e) {
+            ExceptionHandler.handle("保存选中版本失败", e);
+        }
+
+        worker.submit(() -> {
+            try {
+                progressSink.reset("正在下载资源包: " + selected.title());
+                AtomicLong last = new AtomicLong(0);
+                Path path = new ModInstallService(configManager.getConfig())
+                        .installResourcePack(selected.id(), mcVersion, location.targetDir(),
+                                (done, total) -> {
+                                    long prev = last.getAndSet(done);
+                                    long delta = done - prev;
+                                    if (delta > 0) {
+                                        progressSink.addBytes(delta);
+                                    }
+                                    double fp = total > 0 ? done / (double) total : 0.5;
+                                    progressSink.mainFile("下载资源包: " + selected.title(), fp);
+                                    progressSink.status("下载资源包...", 0.05 + 0.9 * fp);
+                                });
+                progressSink.complete("资源包已安装: " + path.getFileName());
+                Platform.runLater(() -> ExceptionHandler.showInfo("完成",
+                        "已安装到：\n" + path.toAbsolutePath()));
+            } catch (Exception e) {
+                ExceptionHandler.handle("安装资源包失败", e);
             }
         });
     }
@@ -970,8 +1182,9 @@ public class DownloadPage extends BorderPane {
                                     if (delta > 0) {
                                         progressSink.addBytes(delta);
                                     }
-                                    progressSink.status("\u4e0b\u8f7d\u6574\u5408\u5305...",
-                                            total > 0 ? 0.05 + 0.9 * done / total : 0.5);
+                                    double fp = total > 0 ? done / (double) total : 0.5;
+                                    progressSink.mainFile("\u4e0b\u8f7d\u6574\u5408\u5305: " + selected.title(), fp);
+                                    progressSink.status("\u4e0b\u8f7d\u6574\u5408\u5305...", 0.05 + 0.9 * fp);
                                 });
                 progressSink.complete("\u6574\u5408\u5305\u5df2\u4e0b\u8f7d: " + path.getFileName());
                 Platform.runLater(() -> {
@@ -1095,8 +1308,12 @@ public class DownloadPage extends BorderPane {
             } else {
                 progressBar.setProgress(target);
             }
-            progressPercent.setText(snap.percentText());
+            progressPercent.setText("\u6574\u4f53 " + snap.percentText());
             progressSpeed.setText(snap.speedText());
+            mainProgressLabel.setText("\u4e3b\u6587\u4ef6 " + snap.mainPercentText());
+            depProgressLabel.setText("\u4f9d\u8d56 " + snap.depPercentText());
+            String depName = snap.depFileName() == null ? "" : snap.depFileName().trim();
+            depFileLabel.setText(depName.isEmpty() ? "" : "\u5f53\u524d\u4f9d\u8d56\uff1a" + depName);
         });
     }
 }

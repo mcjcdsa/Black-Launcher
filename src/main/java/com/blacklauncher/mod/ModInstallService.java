@@ -42,6 +42,12 @@ public class ModInstallService {
         return downloadTo(targetDir, file, progress);
     }
 
+    public Path installResourcePack(String projectId, String mcVersion, Path targetDir,
+                                    BiConsumer<Long, Long> progress) throws LauncherException {
+        ModrinthClient.ModFile file = modrinthClient.latestFile(projectId, blankToNull(mcVersion), null);
+        return downloadTo(targetDir, file, progress);
+    }
+
     public Path installModpack(String projectId, String mcVersion, BiConsumer<Long, Long> progress)
             throws LauncherException {
         ModrinthClient.ModFile file = modrinthClient.latestFile(projectId, blankToNull(mcVersion), null);

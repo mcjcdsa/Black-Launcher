@@ -1,23 +1,29 @@
 package com.blacklauncher.ui.dialogs;
 
 import com.blacklauncher.core.config.AppConfig;
+import com.blacklauncher.core.config.ConfigManager;
 import com.blacklauncher.core.exception.ExceptionHandler;
 import com.blacklauncher.core.util.DiskIoGuard;
 import com.blacklauncher.core.util.Validation;
+import com.blacklauncher.download.InstalledVersionService;
 import com.blacklauncher.minecraft.DirectoryKind;
 import com.blacklauncher.minecraft.GameProcessGuard;
 import com.blacklauncher.minecraft.MinecraftLayout;
-import com.blacklauncher.minecraft.WorldSaveFormat;
 import com.blacklauncher.minecraft.WorldSaveService;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonBar;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -25,6 +31,7 @@ import javafx.stage.Window;
 
 import java.awt.Desktop;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Lists instance worlds, shows format (legacy DIM / dimensions), backs up full folders.
@@ -34,7 +41,13 @@ public final class SaveManagerDialog {
     private SaveManagerDialog() {
     }
 
-    public static void show(Window owner, AppConfig config, String versionId) {
+    public static void show(Window owner, ConfigManager configManager, InstalledVersionService versions,
+                            String versionId) {
+        if (configManager == null) {
+            ExceptionHandler.showInfo("提示", "配置不可用");
+            return;
+        }
+        AppConfig config = configManager.getConfig();
         if (!Validation.isSafeVersionId(versionId)) {
             ExceptionHandler.showInfo("提示", "请先选择一个已安装版本");
             return;
@@ -43,7 +56,7 @@ public final class SaveManagerDialog {
         Dialog<Void> dialog = new Dialog<>();
         dialog.setTitle("存档管理");
         dialog.setHeaderText("实例：" + versionId
-                + (config != null && config.isIsolateGameDirs() ? "（版本隔离）" : "（共享目录）"));
+                + (config.isIsolateGameDirs() ? "（版本隔离）" : "（共享目录）"));
         if (owner != null) {
             dialog.initOwner(owner);
         }
@@ -104,6 +117,34 @@ public final class SaveManagerDialog {
         };
         reload.run();
 
+        CheckBox beforeLaunch = new CheckBox("启动前备份");
+        beforeLaunch.setSelected(config.isBackupBeforeLaunch());
+        CheckBox afterExit = new CheckBox("退出后备份");
+        afterExit.setSelected(config.isBackupAfterExit());
+        Spinner<Integer> keepSpinner = new Spinner<>();
+        keepSpinner.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(
+                1, 30, Math.max(1, Math.min(30, config.getBackupKeepCount())), 1));
+        keepSpinner.setEditable(true);
+        keepSpinner.setPrefWidth(80);
+
+        Button savePolicy = new Button("保存备份策略");
+        savePolicy.setOnAction(e -> {
+            try {
+                config.setBackupBeforeLaunch(beforeLaunch.isSelected());
+                config.setBackupAfterExit(afterExit.isSelected());
+                Integer keep = keepSpinner.getValue();
+                config.setBackupKeepCount(keep == null ? 5 : Math.max(1, Math.min(30, keep)));
+                configManager.save();
+                ExceptionHandler.showInfo("已保存", "备份策略已写入配置");
+            } catch (Exception ex) {
+                ExceptionHandler.handle("保存备份策略失败", ex);
+            }
+        });
+
+        HBox policyRow = new HBox(12, beforeLaunch, afterExit,
+                new Label("保留份数"), keepSpinner, savePolicy);
+        policyRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+
         Button backup = new Button("备份选中世界（完整文件夹）");
         backup.getStyleClass().add("primary-button");
         backup.setOnAction(e -> {
@@ -114,6 +155,7 @@ public final class SaveManagerDialog {
             }
             try {
                 WorldSaveService.BackupResult result = service.backupWorld(versionId, selected.folderName());
+                service.rotateBackups(versionId, selected.folderName(), config.getBackupKeepCount());
                 ExceptionHandler.showInfo("备份完成",
                         "已备份到：\n" + result.archiveOrFolder().toAbsolutePath()
                                 + "\n大小约 " + DiskIoGuard.formatSize(result.bytesCopied())
@@ -122,6 +164,9 @@ public final class SaveManagerDialog {
                 ExceptionHandler.handle("备份失败", ex);
             }
         });
+
+        Button migrate = new Button("迁移到其他版本…");
+        migrate.setOnAction(e -> migrateSelected(owner, config, versions, service, list, versionId, reload));
 
         Button openDir = new Button("打开存档目录");
         openDir.setOnAction(e -> {
@@ -137,12 +182,91 @@ public final class SaveManagerDialog {
         Button refresh = new Button("刷新");
         refresh.setOnAction(e -> reload.run());
 
-        HBox actions = new HBox(10, backup, openDir, refresh);
-        VBox box = new VBox(10, pathLabel, running, list, actions);
+        HBox actions = new HBox(10, backup, migrate, openDir, refresh);
+        VBox box = new VBox(10, pathLabel, running, policyRow, list, actions);
         box.setPadding(new Insets(8, 4, 4, 4));
         dialog.getDialogPane().setContent(box);
-        dialog.getDialogPane().setPrefWidth(720);
+        dialog.getDialogPane().setPrefWidth(760);
         dialog.getDialogPane().getButtonTypes().add(new ButtonType("关闭", ButtonBar.ButtonData.CANCEL_CLOSE));
         dialog.showAndWait();
+    }
+
+    private static void migrateSelected(Window owner,
+                                        AppConfig config,
+                                        InstalledVersionService versions,
+                                        WorldSaveService service,
+                                        ListView<WorldSaveService.WorldInfo> list,
+                                        String fromVersionId,
+                                        Runnable reload) {
+        WorldSaveService.WorldInfo selected = list.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            ExceptionHandler.showInfo("提示", "请选择一个世界");
+            return;
+        }
+        if (versions == null) {
+            ExceptionHandler.showInfo("提示", "无法枚举已安装版本");
+            return;
+        }
+
+        List<String> targets;
+        try {
+            targets = versions.list().stream()
+                    .map(InstalledVersionService.InstalledVersion::id)
+                    .filter(id -> !fromVersionId.equals(id))
+                    .sorted()
+                    .collect(Collectors.toList());
+        } catch (Exception ex) {
+            ExceptionHandler.handle("读取已安装版本失败", ex);
+            return;
+        }
+        if (targets.isEmpty()) {
+            ExceptionHandler.showInfo("提示", "没有其他可迁移的目标版本");
+            return;
+        }
+
+        Dialog<ButtonType> migrateDialog = new Dialog<>();
+        migrateDialog.setTitle("迁移存档");
+        migrateDialog.setHeaderText("将「" + selected.folderName() + "」从 " + fromVersionId + " 复制到：");
+        if (owner != null) {
+            migrateDialog.initOwner(owner);
+        }
+        ComboBox<String> targetBox = new ComboBox<>(FXCollections.observableArrayList(targets));
+        targetBox.getSelectionModel().selectFirst();
+        CheckBox overwrite = new CheckBox("覆盖目标版本中的同名存档");
+        VBox body = new VBox(10, targetBox, overwrite);
+        body.setPadding(new Insets(8));
+        migrateDialog.getDialogPane().setContent(body);
+        migrateDialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        ButtonType result = migrateDialog.showAndWait().orElse(ButtonType.CANCEL);
+        if (result != ButtonType.OK) {
+            return;
+        }
+        String toId = targetBox.getSelectionModel().getSelectedItem();
+        if (!Validation.isSafeVersionId(toId)) {
+            ExceptionHandler.showInfo("提示", "请选择目标版本");
+            return;
+        }
+
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("确认迁移");
+        confirm.setHeaderText("迁移存档到 " + toId + "？");
+        confirm.setContentText("世界：" + selected.folderName()
+                + (overwrite.isSelected() ? "\n同名存档将被覆盖。" : ""));
+        if (owner != null) {
+            confirm.initOwner(owner);
+        }
+        if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
+            return;
+        }
+
+        try {
+            service.migrateWorld(fromVersionId, toId, selected.folderName(), overwrite.isSelected());
+            ExceptionHandler.showInfo("迁移完成",
+                    "已将「" + selected.folderName() + "」复制到版本 " + toId);
+            reload.run();
+        } catch (Exception ex) {
+            ExceptionHandler.handle("迁移失败", ex);
+        }
     }
 }

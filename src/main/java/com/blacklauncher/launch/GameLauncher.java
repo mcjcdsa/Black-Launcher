@@ -6,6 +6,8 @@ import com.blacklauncher.core.exception.LauncherException;
 import com.blacklauncher.core.util.AppPaths;
 import com.blacklauncher.core.util.ProcessCharsets;
 import com.blacklauncher.core.util.Validation;
+import com.blacklauncher.memory.MemoryOptimizeFacade;
+import com.blacklauncher.memory.MemoryProfile;
 import com.blacklauncher.minecraft.GameProcessGuard;
 import com.blacklauncher.minecraft.MinecraftLayout;
 import org.slf4j.Logger;
@@ -37,6 +39,7 @@ public class GameLauncher {
     private final AppConfig config;
     private final Database database;
     private final LaunchCommandBuilder commandBuilder = new LaunchCommandBuilder();
+    private final MemoryOptimizeFacade memoryFacade = new MemoryOptimizeFacade();
     private final ExecutorService ioPool = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "game-log");
         t.setDaemon(true);
@@ -45,6 +48,7 @@ public class GameLauncher {
 
     private Process currentProcess;
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
+    private volatile MemoryProfile activeMemoryProfile;
 
     public GameLauncher(AppConfig config, Database database) {
         this.config = config;
@@ -63,11 +67,24 @@ public class GameLauncher {
     public synchronized void launch(String versionId,
                                     Consumer<String> logLine,
                                     Consumer<GameExitInfo> onExit) throws LauncherException {
+        launch(versionId, logLine, onExit, false);
+    }
+
+    /**
+     * @param acknowledgeLowMemory when true, skip the {@code LOW_MEMORY_CONFIRM:} gate
+     *                             (UI already confirmed after a previous throw).
+     */
+    public synchronized void launch(String versionId,
+                                    Consumer<String> logLine,
+                                    Consumer<GameExitInfo> onExit,
+                                    boolean acknowledgeLowMemory) throws LauncherException {
         if (isRunning()) {
             throw new LauncherException("游戏已在运行中");
         }
         Validation.requireSafeVersionId(versionId);
         stopRequested.set(false);
+
+        MemoryOptimizeFacade.rejectIf32BitJava(config);
 
         MinecraftLayout layout = MinecraftLayout.forVersion(config, versionId);
         Path gameDir = layout.instanceRoot();
@@ -78,6 +95,14 @@ public class GameLauncher {
         }
 
         GameOptionsConfigurator.applyIfEnabled(config, versionId);
+
+        MemoryOptimizeFacade.LaunchPrep prep;
+        if (acknowledgeLowMemory) {
+            prep = memoryFacade.prepareLaunchAfterConfirm(config, versionId, logLine);
+        } else {
+            prep = memoryFacade.prepareLaunch(config, versionId, logLine);
+        }
+        activeMemoryProfile = prep.profile();
 
         List<String> command = commandBuilder.build(config, versionId, gameDir);
         Path logFile = AppPaths.logsDir().resolve(
@@ -97,12 +122,17 @@ public class GameLauncher {
             pb.redirectErrorStream(true);
             currentProcess = pb.start();
             GameProcessGuard.get().markStarted(versionId);
-            LOG.info("Launched Minecraft version {} pid={}", versionId, currentProcess.pid());
+            long pid = currentProcess.pid();
+            LOG.info("Launched Minecraft version {} pid={}", versionId, pid);
+            memoryFacade.afterProcessStarted(pid, activeMemoryProfile, logLine);
 
             Process process = currentProcess;
-            ioPool.submit(() -> captureLog(process, versionId, gameDir, logFile, logId, logLine, onExit));
+            MemoryProfile profileForExit = activeMemoryProfile;
+            ioPool.submit(() -> captureLog(
+                    process, versionId, gameDir, logFile, logId, logLine, onExit, profileForExit));
         } catch (Exception e) {
             currentProcess = null;
+            activeMemoryProfile = null;
             GameProcessGuard.get().markStopped();
             throw new LauncherException("启动游戏失败: " + e.getMessage(), e);
         }
@@ -114,7 +144,8 @@ public class GameLauncher {
                             Path logFile,
                             long logId,
                             Consumer<String> logLine,
-                            Consumer<GameExitInfo> onExit) {
+                            Consumer<GameExitInfo> onExit,
+                            MemoryProfile memoryProfile) {
         AtomicBoolean crashHint = new AtomicBoolean(false);
         StringBuilder logBuf = new StringBuilder(64_000);
         // Decode with native charset (same as -Dfile.encoding / stdout.encoding on the game JVM);
@@ -186,9 +217,17 @@ public class GameLauncher {
                 ));
             }
         } finally {
+            try {
+                memoryFacade.afterProcessExited(memoryProfile, logLine);
+            } catch (Exception e) {
+                LOG.debug("afterProcessExited failed: {}", e.getMessage());
+            }
             synchronized (this) {
                 if (currentProcess == process) {
                     currentProcess = null;
+                }
+                if (activeMemoryProfile == memoryProfile) {
+                    activeMemoryProfile = null;
                 }
             }
             GameProcessGuard.get().markStopped();

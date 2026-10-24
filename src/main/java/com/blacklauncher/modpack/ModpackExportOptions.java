@@ -26,6 +26,8 @@ public final class ModpackExportOptions {
     private boolean includeLaunchScript;
     private boolean includeJvmArgs;
     private boolean stripPrivate = true;
+    /** Index + overrides only (no version jar / saves / screenshots). */
+    private boolean lightUpdatePack;
 
     public Path getOutputFile() {
         return outputFile;
@@ -148,5 +150,33 @@ public final class ModpackExportOptions {
 
     public void setStripPrivate(boolean stripPrivate) {
         this.stripPrivate = stripPrivate;
+    }
+
+    public boolean isLightUpdatePack() {
+        return lightUpdatePack;
+    }
+
+    public void setLightUpdatePack(boolean lightUpdatePack) {
+        this.lightUpdatePack = lightUpdatePack;
+    }
+
+    /** Preset for light update packs: index + overrides (mods/config/resourcepacks). */
+    public static ModpackExportOptions lightUpdatePack(String packName, Path output) {
+        ModpackExportOptions o = new ModpackExportOptions();
+        o.setPackName(packName);
+        o.setOutputFile(output);
+        o.setFormat(Format.MODRINTH);
+        o.setIncludeMods(true);
+        o.setIncludeConfig(true);
+        o.setIncludeResourcepacks(true);
+        o.setIncludeSaves(false);
+        o.setIncludeScreenshots(false);
+        o.setIncludeServers(false);
+        o.setIncludeLaunchScript(false);
+        o.setIncludeJvmArgs(false);
+        o.setIncludeOptions(false);
+        o.setLightUpdatePack(true);
+        o.setStripPrivate(true);
+        return o;
     }
 }

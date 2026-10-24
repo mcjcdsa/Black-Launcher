@@ -14,6 +14,9 @@ import com.blacklauncher.core.util.Validation;
 import com.blacklauncher.download.MavenLibraryResolver;
 import com.blacklauncher.download.OsRules;
 import com.blacklauncher.download.VersionJsonMerger;
+import com.blacklauncher.memory.JvmArgAssembler;
+import com.blacklauncher.memory.MemoryProfile;
+import com.blacklauncher.memory.MemoryProfileStore;
 import com.blacklauncher.model.VersionJson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,9 +85,15 @@ public class LaunchCommandBuilder {
 
         List<String> command = new ArrayList<>();
         command.add(java);
+
+        int javaMajor = JavaVersionProbe.probeMajor(java);
+        MemoryProfile memProfile = MemoryProfileStore.load(config, versionId);
+        List<String> memArgs = JvmArgAssembler.assemble(memProfile, javaMajor);
+        for (String a : memArgs) {
+            command.add(a);
+        }
+
         // HMCL-style hardening defaults (addDefault: only if not already present).
-        addDefault(command, "-Xms" + config.getMinMemoryMb() + "M", a -> a.startsWith("-Xms"));
-        addDefault(command, "-Xmx" + config.getMaxMemoryMb() + "M", a -> a.startsWith("-Xmx"));
         addDefault(command, "-Dlog4j2.formatMsgNoLookups=true",
                 a -> a.startsWith("-Dlog4j2.formatMsgNoLookups="));
         addDefault(command, "-Djava.rmi.server.useCodebaseOnly=true",
@@ -99,7 +108,6 @@ public class LaunchCommandBuilder {
         // Match HMCL: force game stdout/stderr to native charset so log capture is not mojibake.
         String enc = ProcessCharsets.encodingName();
         addDefault(command, "-Dfile.encoding=" + enc, a -> a.startsWith("-Dfile.encoding="));
-        int javaMajor = JavaVersionProbe.probeMajor(java);
         if (javaMajor >= 19) {
             addDefault(command, "-Dstdout.encoding=" + enc, a -> a.startsWith("-Dstdout.encoding="));
             addDefault(command, "-Dstderr.encoding=" + enc, a -> a.startsWith("-Dstderr.encoding="));
@@ -140,16 +148,19 @@ public class LaunchCommandBuilder {
             }
         }
 
-        if (Validation.isNonBlank(config.getJvmArgs())) {
-            for (String arg : config.getJvmArgs().trim().split("\\s+")) {
-                if (!arg.isBlank()) {
-                    command.add(arg);
-                }
-            }
-        }
+        // Version memory.json owns custom JVM args (seeded from AppConfig on first load).
+        // Do not also append global config.getJvmArgs() to avoid duplicates.
 
         BootstrapIgnoreList.rewriteInPlace(command, version.getMainClass(), clientJar, classpath);
         Log4jConfigInjector.applyJvmArg(command, log4jFile);
+
+        // Fabric/Quilt: pin mods folder to the instance root so isolated instances stay separate.
+        String mainClass = version.getMainClass() == null ? "" : version.getMainClass();
+        if (mainClass.contains("fabricmc.loader") || mainClass.contains("quiltmc.loader")) {
+            Path modsDir = gameDir.resolve("mods");
+            addDefault(command, "-Dfabric.modsFolder=" + modsDir.toAbsolutePath(),
+                    a -> a.startsWith("-Dfabric.modsFolder="));
+        }
 
         command.add(version.getMainClass());
 

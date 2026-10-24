@@ -125,6 +125,7 @@ public final class ModpackImportService {
 
                 status(sink, "解压 overrides / 内置模组...", 0.55);
                 extractOverridesAndEmbedded(desc, layout, sink);
+                persistPackIndex(desc, layout);
 
                 status(sink, "下载在线模组...", 0.60);
                 downloadOnlineFiles(desc, layout, sink, report);
@@ -227,6 +228,9 @@ public final class ModpackImportService {
             layout.ensureUserDirectories();
             status(sink, "复制 mods / config 等...", 0.55);
             copyUserContent(contentRoot, layout, report);
+            persistPackIndex(desc, layout);
+            // Also copy index if present at content root (folder packs).
+            copyIndexIfPresent(contentRoot, layout.instanceRoot());
             report.setVersionId(profileId);
         } finally {
             try {
@@ -234,6 +238,43 @@ public final class ModpackImportService {
             } catch (Exception ignored) {
                 // temp cleanup
             }
+        }
+    }
+
+    /** Keep pack index under instance root so {@link ModpackRepairService} can re-check files. */
+    private void persistPackIndex(ModpackDescriptor desc, MinecraftLayout layout) {
+        try {
+            Path destRoot = layout.instanceRoot();
+            Files.createDirectories(destRoot);
+            Path archive = desc.getSourceArchive();
+            Path folder = desc.getSourceFolder();
+            if (archive != null && Files.isRegularFile(archive)) {
+                if (ZipSafe.containsEntry(archive, "modrinth.index.json")) {
+                    Files.writeString(destRoot.resolve("modrinth.index.json"),
+                            ZipSafe.readEntryUtf8(archive, "modrinth.index.json"),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                }
+                if (ZipSafe.containsEntry(archive, "manifest.json")) {
+                    Files.writeString(destRoot.resolve("manifest.json"),
+                            ZipSafe.readEntryUtf8(archive, "manifest.json"),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                }
+            } else if (folder != null && Files.isDirectory(folder)) {
+                copyIndexIfPresent(folder, destRoot);
+            }
+        } catch (Exception e) {
+            LOG.debug("Could not persist pack index: {}", e.toString());
+        }
+    }
+
+    private static void copyIndexIfPresent(Path fromDir, Path destRoot) throws Exception {
+        Path mr = fromDir.resolve("modrinth.index.json");
+        if (Files.isRegularFile(mr)) {
+            Files.copy(mr, destRoot.resolve("modrinth.index.json"), StandardCopyOption.REPLACE_EXISTING);
+        }
+        Path cf = fromDir.resolve("manifest.json");
+        if (Files.isRegularFile(cf)) {
+            Files.copy(cf, destRoot.resolve("manifest.json"), StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

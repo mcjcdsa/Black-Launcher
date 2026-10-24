@@ -7,17 +7,21 @@ import com.blacklauncher.core.config.ConfigManager;
 import com.blacklauncher.core.db.Database;
 import com.blacklauncher.core.exception.ExceptionHandler;
 import com.blacklauncher.core.net.DownloadSource;
+import com.blacklauncher.core.net.MirrorSpeedTester;
 import com.blacklauncher.core.util.AppPaths;
 import com.blacklauncher.core.util.PathChangeService;
 import com.blacklauncher.core.util.UuidUtil;
 import com.blacklauncher.core.util.Validation;
+import com.blacklauncher.download.InstalledVersionService;
 import com.blacklauncher.launch.JavaFinder;
 import com.blacklauncher.ui.UiAnimation;
+import com.blacklauncher.ui.dialogs.FirstRunWizardDialog;
 import com.blacklauncher.ui.dialogs.MicrosoftLoginDialog;
 import com.blacklauncher.ui.dialogs.ModpackProgressDialog;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
@@ -25,6 +29,8 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
+import javafx.scene.control.ListView;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
@@ -40,6 +46,10 @@ import javafx.stage.Window;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
@@ -76,14 +86,27 @@ public class SettingsPage extends BorderPane {
     private final Spinner<Integer> proxyPort = new Spinner<>(0, 65535, 0, 1);
     private final CheckBox isolateDirs = new CheckBox("每个版本独立游戏目录");
     private final TextField playerName = new TextField();
-    private final CheckBox onlineEnabled = new CheckBox("启用联机模式（功能开发中）");
-    private final TextField tunnelHint = new TextField("（占位）穿透服务地址");
+    private final CheckBox onlineEnabled = new CheckBox("启用联机功能入口");
+    private final Spinner<Integer> lanUdpPort = new Spinner<>(1024, 65535, 25566, 1);
+    private final Spinner<Integer> lanServerPort = new Spinner<>(1, 65535, 25565, 1);
+    private final CheckBox lanAutoHelper = new CheckBox("增强模式自动加载 LANHelper 模组");
+    private final TextField lanCloudUrl = new TextField();
     private final ComboBox<DownloadSource> downloadSource = new ComboBox<>();
     private final Spinner<Integer> downloadThreads = new Spinner<>(4, 128, 32, 4);
     private final CheckBox autoGameLang = new CheckBox("下载游戏时自动配置语言文件（options.txt）");
     private final ComboBox<String> gameLanguage = new ComboBox<>();
     private final TextField microsoftClientId = new TextField();
     private final Label accountStatus = new Label();
+    private final MemoryOptimizePane memoryOptimizePane;
+    private final TextField settingsSearch = new TextField();
+    private final Label settingsSearchHint = new Label();
+    private final ListView<JavaFinder.JavaInstall> javaInstallList = new ListView<>();
+    private TabPane tabs;
+    private final ExecutorService settingsWorker = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "settings-worker");
+        t.setDaemon(true);
+        return t;
+    });
 
     public SettingsPage(ConfigManager configManager,
                         Database database,
@@ -93,6 +116,8 @@ public class SettingsPage extends BorderPane {
         this.database = database;
         this.sceneSupplier = sceneSupplier;
         this.onAnimationChanged = onAnimationChanged;
+        this.memoryOptimizePane = new MemoryOptimizePane(
+                configManager, new InstalledVersionService(database, configManager.getConfig()));
 
         getStyleClass().add("page");
         setPadding(new Insets(0));
@@ -112,28 +137,52 @@ public class SettingsPage extends BorderPane {
         downloadSource.setItems(FXCollections.observableArrayList(DownloadSource.values()));
         gameLanguage.setItems(FXCollections.observableArrayList(
                 "zh_CN", "zh_TW", "en_US", "ja_JP", "ko_KR", "ru_RU", "fr_FR", "de_DE"));
-        tunnelHint.setEditable(false);
-        onlineEnabled.setDisable(true);
+        lanUdpPort.setEditable(true);
+        lanServerPort.setEditable(true);
+        lanCloudUrl.setPromptText("可选云端辅助 Base URL（空=仅 Mojang/本地）");
 
         Button save = new Button("保存设置");
         save.getStyleClass().addAll("button", "primary");
         save.setOnAction(e -> saveSettings());
 
-        TabPane tabs = new TabPane(
+        Tab memTab = tab("内存与系统优化", scrollable(memoryOptimizePane));
+        memTab.setOnSelectionChanged(e -> {
+            if (memTab.isSelected()) {
+                memoryOptimizePane.onActivated();
+            }
+        });
+
+        tabs = new TabPane(
                 tab("启动器", launcherPane()),
                 tab("下载加速", downloadPane()),
                 tab("游戏基础", gameBasicPane()),
-                tab("Java与内存", javaPane()),
+                tab("Java", javaPane()),
+                memTab,
                 tab("联机", onlinePane()),
                 tab("账号", accountPane())
         );
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         VBox.setVgrow(tabs, Priority.ALWAYS);
 
-        VBox root = new VBox(10, title, tabs, save);
+        settingsSearch.setPromptText("搜索设置…");
+        HBox.setHgrow(settingsSearch, Priority.ALWAYS);
+        settingsSearchHint.getStyleClass().add("muted");
+        settingsSearch.textProperty().addListener((o, a, b) -> onSettingsSearch(b));
+        HBox searchRow = new HBox(10, settingsSearch, settingsSearchHint);
+        searchRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox root = new VBox(10, title, searchRow, tabs, save);
         setCenter(root);
         loadFromConfig();
         refreshAccountStatus();
+        refreshJavaInstallList(false);
+    }
+
+    private static javafx.scene.control.ScrollPane scrollable(javafx.scene.Node content) {
+        javafx.scene.control.ScrollPane sp = new javafx.scene.control.ScrollPane(content);
+        sp.setFitToWidth(true);
+        sp.setHbarPolicy(javafx.scene.control.ScrollPane.ScrollBarPolicy.NEVER);
+        return sp;
     }
 
     private static Tab tab(String name, javafx.scene.Node content) {
@@ -186,7 +235,11 @@ public class SettingsPage extends BorderPane {
                 + "在线更新只应更新程序目录，勿触碰 MinecraftGame。");
         pathHint.getStyleClass().add("muted");
         pathHint.setWrapText(true);
-        g.add(pathHint, 0, r, 3, 1);
+        g.add(pathHint, 0, r++, 3, 1);
+
+        Button rerunWizard = new Button("重新运行首次向导");
+        rerunWizard.setOnAction(e -> rerunFirstRunWizard());
+        g.add(rerunWizard, 0, r, 3, 1);
         return new VBox(g);
     }
 
@@ -195,7 +248,15 @@ public class SettingsPage extends BorderPane {
         int r = 0;
         g.addRow(r++, new Label("下载源"), downloadSource);
         g.addRow(r++, new Label("并行线程数"), downloadThreads);
-        Label dlHint = new Label("国内推荐 BMCLAPI。游戏文件保存在上方「游戏文件夹」中。");
+
+        Button testMirrors = new Button("镜像测速");
+        testMirrors.setOnAction(e -> runMirrorSpeedTest(false));
+        Button applyFastest = new Button("应用最快源");
+        applyFastest.setOnAction(e -> applyFastestMirror());
+        g.add(new HBox(8, testMirrors, applyFastest), 0, r++, 2, 1);
+
+        Label dlHint = new Label("国内推荐 BMCLAPI 镜像；官方源延迟通常更高，适合镜像故障时切换。"
+                + " 游戏文件保存在「启动器」页的游戏文件夹中。");
         dlHint.getStyleClass().add("muted");
         dlHint.setWrapText(true);
         g.add(dlHint, 0, r, 2, 1);
@@ -339,9 +400,44 @@ public class SettingsPage extends BorderPane {
         });
         g.addRow(r++, new Label("Java 路径"), javaPath, browseJava);
         g.add(detectJava, 2, r - 1);
-        g.addRow(r++, new Label("最小内存 MB"), minMemory);
-        g.addRow(r++, new Label("最大内存 MB"), maxMemory);
-        g.addRow(r, new Label("JVM 参数"), jvmArgs);
+
+        javaInstallList.setPrefHeight(140);
+        javaInstallList.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(JavaFinder.JavaInstall item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatJavaInstall(item));
+            }
+        });
+        g.add(new Label("本机 Java"), 0, r);
+        g.add(javaInstallList, 1, r++, 2, 1);
+
+        Button scanJava = new Button("扫描本机 Java");
+        scanJava.setOnAction(e -> refreshJavaInstallList(true));
+        Button useSelected = new Button("使用所选");
+        useSelected.setOnAction(e -> {
+            JavaFinder.JavaInstall selected = javaInstallList.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                ExceptionHandler.showInfo("提示", "请先在列表中选择一项 Java");
+                return;
+            }
+            javaPath.setText(selected.executable());
+        });
+        g.add(new HBox(8, scanJava, useSelected), 1, r++, 2, 1);
+
+        Label multiHint = new Label("多版本 MC 常需 Java 8/17/21，不匹配会启动失败。");
+        multiHint.getStyleClass().add("muted");
+        multiHint.setWrapText(true);
+        g.add(multiHint, 0, r++, 3, 1);
+
+        Label hint = new Label("堆内存、GC 方案与系统内存整理请到「内存与系统优化」按版本配置。"
+                + " 下方数值仅作新版本默认种子。");
+        hint.getStyleClass().add("muted");
+        hint.setWrapText(true);
+        g.add(hint, 0, r++, 3, 1);
+        g.addRow(r++, new Label("默认最小内存 MB"), minMemory);
+        g.addRow(r++, new Label("默认最大内存 MB"), maxMemory);
+        g.addRow(r, new Label("默认 JVM 参数"), jvmArgs);
         return new VBox(g);
     }
 
@@ -349,8 +445,13 @@ public class SettingsPage extends BorderPane {
         GridPane g = grid();
         int r = 0;
         g.add(onlineEnabled, 0, r++, 2, 1);
-        g.addRow(r++, new Label("穿透地址"), tunnelHint);
-        Label onlineHint = new Label("联机大厅仍为占位页，此处开关预留给后续版本。");
+        g.addRow(r++, new Label("UDP 广播端口"), lanUdpPort);
+        g.addRow(r++, new Label("默认服务端端口"), lanServerPort);
+        g.add(lanAutoHelper, 0, r++, 2, 1);
+        g.addRow(r++, new Label("云端辅助 URL"), lanCloudUrl);
+        Label onlineHint = new Label(
+                "联机模块需要联网拉取版本/server.jar/LANHelper；游戏连接本身仍走局域网。"
+                        + " 不提供内网穿透或公网中转。UDP 广播失效时请用手动 IP 加入。");
         onlineHint.getStyleClass().add("muted");
         onlineHint.setWrapText(true);
         g.add(onlineHint, 0, r, 2, 1);
@@ -360,7 +461,8 @@ public class SettingsPage extends BorderPane {
     private VBox accountPane() {
         GridPane g = grid();
         int r = 0;
-        g.addRow(r++, new Label("离线玩家名"), playerName);
+        g.addRow(r++, new Label("游戏昵称"), playerName);
+        playerName.setPromptText("3–16 位字母/数字/下划线");
         microsoftClientId.setPromptText("Azure client_id（需 Mojang 审批）");
         g.addRow(r++, new Label("Client ID"), microsoftClientId);
         accountStatus.getStyleClass().add("muted");
@@ -404,13 +506,137 @@ public class SettingsPage extends BorderPane {
         try {
             MicrosoftAuthService auth = new MicrosoftAuthService(configManager.getConfig());
             MicrosoftAuthService.Session session = auth.refreshSession();
-            auth.applyToConfig(session);
+            auth.applyToConfig(session, true);
             configManager.save();
             refreshAccountStatus();
             ExceptionHandler.showInfo("已刷新", "Minecraft 访问令牌已更新");
         } catch (Exception e) {
             ExceptionHandler.handle("刷新令牌失败", e);
         }
+    }
+
+    private void onSettingsSearch(String raw) {
+        if (tabs == null) {
+            return;
+        }
+        String q = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if (q.isEmpty()) {
+            settingsSearchHint.setText("");
+            return;
+        }
+        Map<String, List<String>> keywords = settingsTabKeywords();
+        for (Tab tab : tabs.getTabs()) {
+            String title = tab.getText() == null ? "" : tab.getText();
+            List<String> keys = keywords.getOrDefault(title, List.of(title));
+            boolean hit = title.toLowerCase(Locale.ROOT).contains(q);
+            if (!hit) {
+                for (String key : keys) {
+                    if (key.toLowerCase(Locale.ROOT).contains(q) || q.contains(key.toLowerCase(Locale.ROOT))) {
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+            if (hit) {
+                tabs.getSelectionModel().select(tab);
+                settingsSearchHint.setText("匹配：" + title);
+                return;
+            }
+        }
+        settingsSearchHint.setText("无匹配");
+    }
+
+    private static Map<String, List<String>> settingsTabKeywords() {
+        Map<String, List<String>> map = new LinkedHashMap<>();
+        map.put("启动器", List.of("启动器", "语言", "主题", "路径", "文件夹", "向导", "动画", "迁移"));
+        map.put("下载加速", List.of("下载", "加速", "镜像", "源", "线程", "bmcl", "官方", "测速"));
+        map.put("游戏基础", List.of("游戏", "基础", "语言", "分辨率", "全屏", "代理", "隔离"));
+        map.put("Java", List.of("java", "jdk", "jre", "jvm"));
+        map.put("内存与系统优化", List.of("内存", "优化", "gc", "xmx", "xms", "整理"));
+        map.put("联机", List.of("联机", "局域网", "lan", "广播", "云端"));
+        map.put("账号", List.of("账号", "微软", "登录", "昵称", "令牌", "正版"));
+        return map;
+    }
+
+    private void rerunFirstRunWizard() {
+        boolean done = FirstRunWizardDialog.show(window(), configManager);
+        loadFromConfig();
+        refreshAccountStatus();
+        refreshJavaInstallList(false);
+        Scene scene = sceneSupplier == null ? null : sceneSupplier.get();
+        if (scene != null) {
+            BlackLauncherApp.applyTheme(scene, configManager.getConfig().getTheme());
+        }
+        if (done) {
+            ExceptionHandler.showInfo("完成", "首次向导设置已应用");
+        }
+    }
+
+    private void refreshJavaInstallList(boolean announce) {
+        settingsWorker.submit(() -> {
+            List<JavaFinder.JavaInstall> installs = JavaFinder.discoverInstalls();
+            Platform.runLater(() -> {
+                javaInstallList.setItems(FXCollections.observableArrayList(installs));
+                String current = javaPath.getText() == null ? "" : javaPath.getText().trim();
+                if (Validation.isNonBlank(current)) {
+                    for (JavaFinder.JavaInstall j : installs) {
+                        if (j.executable().equalsIgnoreCase(current)) {
+                            javaInstallList.getSelectionModel().select(j);
+                            break;
+                        }
+                    }
+                }
+                if (announce) {
+                    ExceptionHandler.showInfo("扫描完成",
+                            installs.isEmpty() ? "未发现可用 Java" : "共发现 " + installs.size() + " 个 Java");
+                }
+            });
+        });
+    }
+
+    private static String formatJavaInstall(JavaFinder.JavaInstall j) {
+        return "Java " + j.major() + " (" + (j.sixtyFourBit() ? "64位" : "32位") + ") — " + j.executable();
+    }
+
+    private void runMirrorSpeedTest(boolean applyFastest) {
+        settingsWorker.submit(() -> {
+            try {
+                MirrorSpeedTester tester = new MirrorSpeedTester();
+                List<MirrorSpeedTester.Result> results = tester.testAll();
+                DownloadSource fastest = tester.recommendFastest();
+                StringBuilder sb = new StringBuilder();
+                for (MirrorSpeedTester.Result r : results) {
+                    sb.append(r.source().displayName())
+                            .append("：")
+                            .append(r.ok() ? r.latencyMs() + " ms" : "失败")
+                            .append("（")
+                            .append(r.detail() == null ? "" : r.detail())
+                            .append("）\n");
+                }
+                sb.append("\n推荐：").append(fastest.displayName());
+                Platform.runLater(() -> {
+                    if (applyFastest) {
+                        downloadSource.getSelectionModel().select(fastest);
+                        AppConfig c = configManager.getConfig();
+                        c.setDownloadSource(fastest.id());
+                        try {
+                            configManager.save();
+                            ExceptionHandler.showInfo("已应用最快源", sb.toString());
+                        } catch (Exception e) {
+                            ExceptionHandler.handle("保存下载源失败", e);
+                        }
+                    } else {
+                        ExceptionHandler.showInfo("镜像测速", sb.toString());
+                    }
+                });
+            } catch (Exception e) {
+                ExceptionHandler.handle("镜像测速失败", e);
+            }
+        });
+    }
+
+    private void applyFastestMirror() {
+        runMirrorSpeedTest(true);
     }
 
     private void loadFromConfig() {
@@ -432,6 +658,11 @@ public class SettingsPage extends BorderPane {
         isolateDirs.setSelected(c.isIsolateGameDirs());
         playerName.setText(c.getPlayerName());
         onlineEnabled.setSelected(c.isOnlineModeEnabled());
+        var lan = c.getLan();
+        lanUdpPort.getValueFactory().setValue(lan.getBroadcastUdpPort() <= 0 ? 25566 : lan.getBroadcastUdpPort());
+        lanServerPort.getValueFactory().setValue(lan.getDefaultServerPort() <= 0 ? 25565 : lan.getDefaultServerPort());
+        lanAutoHelper.setSelected(lan.isAutoLoadLanHelper());
+        lanCloudUrl.setText(lan.getCloudBaseUrl() == null ? "" : lan.getCloudBaseUrl());
         downloadSource.getSelectionModel().select(DownloadSource.fromId(c.getDownloadSource()));
         downloadThreads.getValueFactory().setValue(c.getDownloadThreads());
         autoGameLang.setSelected(c.isAutoConfigureGameLanguage());
@@ -462,16 +693,30 @@ public class SettingsPage extends BorderPane {
             c.setIsolateGameDirs(isolateDirs.isSelected());
             c.setMicrosoftClientId(microsoftClientId.getText() == null
                     ? "" : microsoftClientId.getText().trim());
+            String nickViolation = Validation.playerNameViolation(playerName.getText());
+            if (nickViolation != null) {
+                ExceptionHandler.showInfo("昵称不合规", nickViolation);
+                return;
+            }
+            String name = playerName.getText().trim();
+            c.setPlayerName(name);
+            playerName.setText(name);
             boolean msa = "msa".equalsIgnoreCase(c.getAccountType())
                     && Validation.isNonBlank(c.getMinecraftAccessToken());
             if (!msa) {
-                String name = Validation.sanitizePlayerName(playerName.getText());
-                c.setPlayerName(name);
                 c.setPlayerUuid(UuidUtil.offlineUuid(name));
-                playerName.setText(name);
                 c.setAccountType("offline");
             }
             c.setOnlineModeEnabled(onlineEnabled.isSelected());
+            var lan = c.getLan();
+            if (lan == null) {
+                lan = new com.blacklauncher.online.LanConfig();
+                c.setLan(lan);
+            }
+            lan.setBroadcastUdpPort(lanUdpPort.getValue());
+            lan.setDefaultServerPort(lanServerPort.getValue());
+            lan.setAutoLoadLanHelper(lanAutoHelper.isSelected());
+            lan.setCloudBaseUrl(lanCloudUrl.getText() == null ? "" : lanCloudUrl.getText().trim());
             DownloadSource source = downloadSource.getValue() == null
                     ? DownloadSource.BMCLAPI : downloadSource.getValue();
             c.setDownloadSource(source.id());

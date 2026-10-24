@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
- * Aggregates download status, percent and speed for UI display.
+ * Aggregates overall / main-file / dependency progress for UI (§10.3).
  */
 public class DownloadProgressSink {
 
@@ -22,6 +22,9 @@ public class DownloadProgressSink {
 
     private volatile String message = "就绪";
     private volatile double progress;
+    private volatile double mainProgress;
+    private volatile double depProgress;
+    private volatile String depFileName = "";
     private long lastUiNs;
 
     public DownloadProgressSink(Consumer<Snapshot> listener) {
@@ -34,6 +37,9 @@ public class DownloadProgressSink {
             totalBytes.set(0);
             this.message = message == null ? "" : message;
             this.progress = 0;
+            this.mainProgress = 0;
+            this.depProgress = 0;
+            this.depFileName = "";
             lastUiNs = 0;
         }
         publish(true);
@@ -41,6 +47,27 @@ public class DownloadProgressSink {
 
     public void status(String message, double progress01) {
         this.message = message == null ? "" : message;
+        this.progress = clamp(progress01);
+        publish(false);
+    }
+
+    /** Main artifact progress (client jar / mod primary file). */
+    public void mainFile(String message, double progress01) {
+        if (message != null && !message.isBlank()) {
+            this.message = message;
+        }
+        this.mainProgress = clamp(progress01);
+        publish(false);
+    }
+
+    /** Current dependency file name + its own 0–1 progress. */
+    public void dependency(String fileName, double progress01) {
+        this.depFileName = fileName == null ? "" : fileName;
+        this.depProgress = clamp(progress01);
+        publish(false);
+    }
+
+    public void overall(double progress01) {
         this.progress = clamp(progress01);
         publish(false);
     }
@@ -62,6 +89,8 @@ public class DownloadProgressSink {
     public void complete(String message) {
         this.message = message == null ? "完成" : message;
         this.progress = 1.0;
+        this.mainProgress = 1.0;
+        this.depProgress = 1.0;
         publish(true);
     }
 
@@ -78,7 +107,12 @@ public class DownloadProgressSink {
                 speed,
                 formatPercent(progress),
                 formatSpeed(speed),
-                totalBytes.get()
+                totalBytes.get(),
+                mainProgress,
+                formatPercent(mainProgress),
+                depProgress,
+                formatPercent(depProgress),
+                depFileName
         );
         listener.accept(snap);
     }
@@ -138,8 +172,19 @@ public class DownloadProgressSink {
             double bytesPerSecond,
             String percentText,
             String speedText,
-            long totalBytes
+            long totalBytes,
+            double mainProgress,
+            String mainPercentText,
+            double depProgress,
+            String depPercentText,
+            String depFileName
     ) {
+        /** Backward-compatible compact constructor used by older call sites. */
+        public Snapshot(String message, double progress, double bytesPerSecond,
+                        String percentText, String speedText, long totalBytes) {
+            this(message, progress, bytesPerSecond, percentText, speedText, totalBytes,
+                    progress, percentText, 0, "0.0%", "");
+        }
     }
 
     private record Sample(long nanos, long bytes) {

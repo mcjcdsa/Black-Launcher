@@ -104,7 +104,15 @@ public class ModLoaderInstallService {
     public String downloadWithLoader(VersionManifest.VersionEntry entry,
                                      ModLoader loader,
                                      DownloadProgressSink sink) throws LauncherException {
-        return downloadWithLoader(entry, loader, null, null, sink);
+        return downloadWithLoader(entry, new LoaderInstallChoice(loader, null, false), sink);
+    }
+
+    public String downloadWithLoader(VersionManifest.VersionEntry entry,
+                                     LoaderInstallChoice choice,
+                                     DownloadProgressSink sink) throws LauncherException {
+        LoaderInstallChoice c = choice == null ? LoaderInstallChoice.vanilla() : choice;
+        return downloadWithLoader(entry, c.loaderOrVanilla(), c.loaderVersion(), null,
+                c.installCompanionApi(), sink);
     }
 
     /**
@@ -117,6 +125,15 @@ public class ModLoaderInstallService {
                                      ModLoader loader,
                                      String pinnedLoaderVersion,
                                      String preferredProfileId,
+                                     DownloadProgressSink sink) throws LauncherException {
+        return downloadWithLoader(entry, loader, pinnedLoaderVersion, preferredProfileId, false, sink);
+    }
+
+    public String downloadWithLoader(VersionManifest.VersionEntry entry,
+                                     ModLoader loader,
+                                     String pinnedLoaderVersion,
+                                     String preferredProfileId,
+                                     boolean installCompanionApi,
                                      DownloadProgressSink sink) throws LauncherException {
         Validation.requireSafeVersionId(entry.getId());
         ModLoader selected = loader == null ? ModLoader.VANILLA : loader;
@@ -154,6 +171,19 @@ public class ModLoaderInstallService {
         } catch (Exception e) {
             throw new LauncherException("记录加载器版本失败", e);
         }
+
+        if (installCompanionApi) {
+            try {
+                LoaderApiInstaller.installIfNeeded(config, selected, entry.getId(), profileId, sink);
+            } catch (LauncherException apiEx) {
+                // Do not roll back loader — surface warning via status then continue.
+                LOG.warn("Companion API install failed: {}", apiEx.getMessage());
+                report(sink, apiEx.getMessage(), 0.97);
+            }
+        } else if (LoaderApiInstaller.supportsCompanionApi(selected)) {
+            report(sink, "已跳过配套 API 安装", 0.97);
+        }
+
         GameOptionsConfigurator.applyIfEnabled(config, profileId);
         if (sink != null) {
             sink.complete(selected.displayName() + " 安装完成: " + profileId);

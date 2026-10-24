@@ -22,7 +22,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 /**
- * Export options panel (§6.3.1).
+ * Export options panel (§6.3.1 / P1.3 light update pack).
  */
 public final class ModpackExportDialog {
 
@@ -70,6 +70,25 @@ public final class ModpackExportDialog {
         CheckBox jvm = new CheckBox("导出启动参数（JVM）");
         CheckBox strip = new CheckBox("移除作者皮肤 / 私有信息");
         strip.setSelected(true);
+        CheckBox light = new CheckBox("轻量更新包（仅索引 + overrides）");
+        light.setSelected(false);
+
+        Runnable applyLightFlags = () -> {
+            boolean on = light.isSelected();
+            if (on) {
+                mods.setSelected(true);
+                config.setSelected(true);
+                resourcepacks.setSelected(true);
+                saves.setSelected(false);
+                servers.setSelected(false);
+                jvm.setSelected(false);
+                formatBox.getSelectionModel().select(1); // Modrinth preferred
+            }
+            saves.setDisable(on);
+            servers.setDisable(on);
+            jvm.setDisable(on);
+        };
+        light.selectedProperty().addListener((o, a, b) -> applyLightFlags.run());
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -82,6 +101,8 @@ public final class ModpackExportDialog {
         grid.add(new HBox(8, pathField, browse), 1, r++);
         grid.add(new Label("导出格式"), 0, r);
         grid.add(formatBox, 1, r++);
+        grid.add(light, 0, r, 2, 1);
+        r++;
         grid.add(mods, 0, r, 2, 1);
         r++;
         grid.add(config, 0, r, 2, 1);
@@ -107,6 +128,20 @@ public final class ModpackExportDialog {
             if (btn != ok) {
                 return null;
             }
+            if (light.isSelected()) {
+                ModpackExportOptions opts = ModpackExportOptions.lightUpdatePack(
+                        nameField.getText() == null ? packName : nameField.getText().trim(),
+                        Path.of(pathField.getText().trim()));
+                opts.setIncludeMods(mods.isSelected());
+                opts.setIncludeConfig(config.isSelected());
+                opts.setIncludeResourcepacks(resourcepacks.isSelected());
+                opts.setStripPrivate(strip.isSelected());
+                int fi = formatBox.getSelectionModel().getSelectedIndex();
+                opts.setFormat(fi == 2 ? ModpackExportOptions.Format.CURSEFORGE
+                        : fi == 0 ? ModpackExportOptions.Format.OFFLINE_ZIP
+                        : ModpackExportOptions.Format.MODRINTH);
+                return opts;
+            }
             ModpackExportOptions opts = new ModpackExportOptions();
             opts.setPackName(nameField.getText() == null ? packName : nameField.getText().trim());
             opts.setOutputFile(Path.of(pathField.getText().trim()));
@@ -121,6 +156,7 @@ public final class ModpackExportDialog {
             opts.setIncludeServers(servers.isSelected());
             opts.setIncludeJvmArgs(jvm.isSelected());
             opts.setStripPrivate(strip.isSelected());
+            opts.setLightUpdatePack(false);
             return opts;
         });
 

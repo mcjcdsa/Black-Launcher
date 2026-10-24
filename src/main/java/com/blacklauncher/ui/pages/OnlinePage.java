@@ -1,72 +1,111 @@
 package com.blacklauncher.ui.pages;
 
-import javafx.animation.Animation;
-import javafx.animation.Interpolator;
-import javafx.animation.RotateTransition;
+import com.blacklauncher.core.config.ConfigManager;
+import com.blacklauncher.core.db.Database;
+import com.blacklauncher.launch.GameLauncher;
 import javafx.geometry.Insets;
-import javafx.geometry.Pos;
-import javafx.scene.control.Button;
+import javafx.scene.Node;
 import javafx.scene.control.Label;
-import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.VBox;
-import javafx.util.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.util.function.Consumer;
 
 /**
- * Online multiplayer placeholder (@5) — no business logic yet.
+ * Online multiplayer hub.
+ * <p>
+ * Full LAN implementation lives under {@code src/private/java} (not open-sourced).
+ * When that source set is present locally, {@code LanPage} is loaded via reflection;
+ * otherwise a placeholder is shown so the public tree still compiles.
  */
 public class OnlinePage extends BorderPane {
 
-    private final RotateTransition spin;
+    private static final Logger LOG = LoggerFactory.getLogger(OnlinePage.class);
+    private static final String LAN_PAGE_CLASS = "com.blacklauncher.ui.pages.LanPage";
 
-    public OnlinePage(Runnable backHome) {
+    private final Object lanPage;
+    private final Method onActivatedMethod;
+
+    public OnlinePage(ConfigManager configManager, Database database, GameLauncher gameLauncher,
+                      Consumer<String> statusSink) {
         getStyleClass().add("page");
-        setPadding(new Insets(4));
 
-        Label title = new Label("联机大厅");
-        title.getStyleClass().add("page-title");
-        title.setStyle("-fx-font-size: 22px;");
-
-        Label icon = new Label("🌐");
-        icon.setStyle("-fx-font-size: 42px;");
-
-        Label detail = new Label("局域网联机 / 穿透联机 / 托管房间 正在开发，敬请期待");
-        detail.getStyleClass().add("muted");
-        detail.setWrapText(true);
-        detail.setStyle("-fx-font-size: 14px;");
-
-        ProgressIndicator ring = new ProgressIndicator();
-        ring.setPrefSize(36, 36);
-        ring.setProgress(-1);
-        // Slow uniform spin feel via RotateTransition on a wrapper label when animations on.
-        Label spinnerProxy = new Label("◐");
-        spinnerProxy.setStyle("-fx-font-size: 28px; -fx-text-fill: #8892A0;");
-        spin = new RotateTransition(Duration.millis(2500), spinnerProxy);
-        spin.setByAngle(360);
-        spin.setCycleCount(Animation.INDEFINITE);
-        spin.setInterpolator(Interpolator.LINEAR);
-        if (com.blacklauncher.ui.UiAnimation.isEnabled()) {
-            spin.play();
+        Object loaded = null;
+        Method activated = null;
+        Node centerContent;
+        try {
+            Class<?> clazz = Class.forName(LAN_PAGE_CLASS);
+            Constructor<?> ctor = clazz.getConstructor(
+                    ConfigManager.class, Database.class, GameLauncher.class, Consumer.class);
+            loaded = ctor.newInstance(configManager, database, gameLauncher, statusSink);
+            activated = clazz.getMethod("onActivated");
+            centerContent = (Node) loaded;
+        } catch (ClassNotFoundException e) {
+            LOG.info("LAN module not present (open-source build); showing placeholder");
+            centerContent = placeholder();
+        } catch (ReflectiveOperationException e) {
+            LOG.warn("Failed to load LAN module", e);
+            centerContent = placeholder();
         }
 
-        Button back = new Button("返回主页");
-        back.setOnAction(e -> {
-            if (backHome != null) {
-                backHome.run();
+        this.lanPage = loaded;
+        this.onActivatedMethod = activated;
+
+        Tab lanTab = new Tab("局域网联机", centerContent);
+        lanTab.setClosable(false);
+        TabPane tabs = new TabPane(lanTab);
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        setCenter(tabs);
+
+        sceneProperty().addListener((o, oldScene, newScene) -> {
+            if (newScene != null) {
+                onActivated();
             }
         });
-
-        VBox center = new VBox(16, icon, title, detail, spinnerProxy, ring, back);
-        center.setAlignment(Pos.CENTER);
-        center.setPadding(new Insets(48, 24, 24, 24));
-        setCenter(center);
-
-        sceneProperty().addListener((o, a, b) -> {
-            if (b == null) {
-                spin.stop();
-            } else if (com.blacklauncher.ui.UiAnimation.isEnabled()) {
-                spin.play();
+        visibleProperty().addListener((o, was, now) -> {
+            if (Boolean.TRUE.equals(now) && getScene() != null) {
+                onActivated();
             }
         });
+    }
+
+    public void onActivated() {
+        if (lanPage == null || onActivatedMethod == null) {
+            return;
+        }
+        try {
+            onActivatedMethod.invoke(lanPage);
+        } catch (ReflectiveOperationException e) {
+            LOG.debug("LanPage.onActivated failed: {}", e.toString());
+        }
+    }
+
+    /** @return LanPage instance when private module is present; otherwise null */
+    public Object lanPage() {
+        return lanPage;
+    }
+
+    public boolean isLanModulePresent() {
+        return lanPage != null;
+    }
+
+    private static Node placeholder() {
+        Label title = new Label("联机模块未包含在开源版本中");
+        title.getStyleClass().add("page-title");
+        Label body = new Label(
+                "局域网联机（房间 / 本地服务器 / 发现与加入）为闭源能力，"
+                        + "仅随完整发行版或本地 private 源码集提供。\n"
+                        + "开源仓库可正常编译运行其余功能。");
+        body.setWrapText(true);
+        body.getStyleClass().add("muted");
+        VBox box = new VBox(12, title, body);
+        box.setPadding(new Insets(24));
+        return box;
     }
 }

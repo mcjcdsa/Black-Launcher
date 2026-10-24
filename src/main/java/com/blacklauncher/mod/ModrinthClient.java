@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 /**
  * Modrinth API client for browsing and downloading mods / shaders / modpacks.
@@ -114,6 +115,48 @@ public class ModrinthClient {
         return result;
     }
 
+    /**
+     * Resolve a Modrinth version by local file SHA-1. Empty when the hash is unknown (HTTP 404).
+     */
+    public Optional<ModVersion> versionByHash(String sha1) throws LauncherException {
+        if (!Validation.isNonBlank(sha1)) {
+            return Optional.empty();
+        }
+        String hash = sha1.trim().toLowerCase(Locale.ROOT);
+        HttpUrl url = HttpUrl.parse(API + "/version_file/" + hash).newBuilder()
+                .addQueryParameter("algorithm", "sha1")
+                .build();
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", USER_AGENT)
+                .get()
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (response.code() == 404) {
+                return Optional.empty();
+            }
+            if (!response.isSuccessful()) {
+                throw new LauncherException("Modrinth 哈希查询失败: HTTP " + response.code());
+            }
+            ResponseBody body = response.body();
+            if (body == null) {
+                return Optional.empty();
+            }
+            ModVersion parsed = parseVersion(JsonUtil.parse(body.string()).getAsJsonObject());
+            return Optional.ofNullable(parsed);
+        } catch (LauncherException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new LauncherException("Modrinth 哈希查询失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** Filtered project versions (same as {@link #listVersions}). */
+    public List<ModVersion> projectVersions(String projectId, String gameVersion, String loader)
+            throws LauncherException {
+        return listVersions(projectId, gameVersion, loader);
+    }
+
     /** All versions for a project (client-side filter/sort on detail page). */
     public List<ModVersion> listAllVersions(String projectId) throws LauncherException {
         return listVersions(projectId, null, null);
@@ -154,8 +197,11 @@ public class ModrinthClient {
                 ? version.get("changelog").getAsString() : "";
         long published = parseInstant(version.has("date_published") ? version.get("date_published").getAsString() : null);
         List<ModDependency> deps = parseDependencies(version.getAsJsonArray("dependencies"));
+        String projectId = version.has("project_id") && !version.get("project_id").isJsonNull()
+                ? version.get("project_id").getAsString() : "";
         return new ModVersion(
                 version.get("id").getAsString(),
+                projectId,
                 version.has("version_number") ? version.get("version_number").getAsString() : "",
                 version.has("name") ? version.get("name").getAsString() : "",
                 loaders,
@@ -382,6 +428,7 @@ public class ModrinthClient {
 
     public record ModVersion(
             String id,
+            String projectId,
             String versionNumber,
             String name,
             List<String> loaders,

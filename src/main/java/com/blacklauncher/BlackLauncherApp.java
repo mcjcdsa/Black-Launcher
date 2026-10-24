@@ -6,7 +6,9 @@ import com.blacklauncher.core.db.Database;
 import com.blacklauncher.core.exception.ExceptionHandler;
 import com.blacklauncher.core.util.AppPaths;
 import com.blacklauncher.ui.MainShell;
+import com.blacklauncher.ui.dialogs.FirstRunWizardDialog;
 import javafx.application.Application;
+import javafx.application.HostServices;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 import org.slf4j.Logger;
@@ -18,9 +20,15 @@ import org.slf4j.LoggerFactory;
 public class BlackLauncherApp extends Application {
 
     private static final Logger LOG = LoggerFactory.getLogger(BlackLauncherApp.class);
+    private static volatile HostServices hostServices;
 
     private ConfigManager configManager;
     private Database database;
+
+    /** For opening external URLs from UI pages (§9). */
+    public static HostServices hostServices() {
+        return hostServices;
+    }
 
     @Override
     public void init() {
@@ -38,6 +46,7 @@ public class BlackLauncherApp extends Application {
 
     @Override
     public void start(Stage stage) {
+        hostServices = getHostServices();
         AppConfig config = configManager.getConfig();
         MainShell shell = new MainShell(configManager, database);
         Scene scene = new Scene(shell, 1180, 740);
@@ -48,6 +57,10 @@ public class BlackLauncherApp extends Application {
         stage.setMinHeight(600);
         stage.setScene(scene);
         stage.show();
+        if (!config.isFirstRunWizardDone()) {
+            FirstRunWizardDialog.show(stage, configManager);
+            applyTheme(scene, configManager.getConfig().getTheme());
+        }
         LOG.info("Black Launcher started, version {}", AppInfo.VERSION);
     }
 

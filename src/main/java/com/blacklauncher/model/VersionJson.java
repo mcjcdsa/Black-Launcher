@@ -184,6 +184,7 @@ public class VersionJson {
 
     public static class Downloads {
         private Artifact client;
+        private Artifact server;
 
         public Artifact getClient() {
             return client;
@@ -191,6 +192,14 @@ public class VersionJson {
 
         public void setClient(Artifact client) {
             this.client = client;
+        }
+
+        public Artifact getServer() {
+            return server;
+        }
+
+        public void setServer(Artifact server) {
+            this.server = server;
         }
     }
 

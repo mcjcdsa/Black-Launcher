@@ -36,6 +36,31 @@ public final class Validation {
         return cleaned;
     }
 
+    /** Mojang-compatible username: 3–16 chars of {@code A-Za-z0-9_}. */
+    public static boolean isValidPlayerName(String name) {
+        return isNonBlank(name) && PLAYER_NAME.matcher(name.trim()).matches();
+    }
+
+    /**
+     * @return null if valid; otherwise a short Chinese error message
+     */
+    public static String playerNameViolation(String name) {
+        if (!isNonBlank(name) || name.trim().isEmpty()) {
+            return "昵称不能为空";
+        }
+        String trimmed = name.trim();
+        if (trimmed.length() < 3) {
+            return "昵称至少 3 个字符";
+        }
+        if (trimmed.length() > 16) {
+            return "昵称最多 16 个字符";
+        }
+        if (!PLAYER_NAME.matcher(trimmed).matches()) {
+            return "昵称仅允许英文字母、数字和下划线";
+        }
+        return null;
+    }
+
     public static boolean isSafeVersionId(String versionId) {
         return isNonBlank(versionId) && SAFE_PATH_SEGMENT.matcher(versionId).matches();
     }
