@@ -29,3 +29,4 @@ src/private/
 
 # Vendored CodeQL Action sources (use github/codeql-action@v4.39.1 in CI instead)
 codeql-action-4.39.1/
+codeql-action-4.39.1.zip
