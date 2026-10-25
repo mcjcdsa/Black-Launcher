@@ -1,0 +1,21 @@
+# CodeQL configuration for Black Launcher
+# Docs: https://docs.github.com/en/code-security/code-scanning
+
+name: Black Launcher CodeQL
+
+paths:
+  - src
+  - .github/workflows
+  - build.gradle.kts
+  - settings.gradle.kts
+
+paths-ignore:
+  - build/**
+  - .gradle/**
+  - out/**
+  - "**/*.class"
+  - codeql-action-4.39.1/**
+  - installer/**
+  - "**/*.md"
+  - "**/*.txt"
+  - src/main/resources/**

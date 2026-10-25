@@ -71,6 +71,17 @@ gradlew.bat stageInstallerPayload buildInstaller
 - Fabric 模组模板生成器（对齐 [fabricmc.net/develop/template](https://fabricmc.net/develop/template)）
 - 官方开发文档内嵌同步与离线检索（侧栏「模组开发」）
 
+## 代码扫描（CodeQL）
+
+仓库已配置 GitHub Actions 工作流 [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml)，使用 [`github/codeql-action@v4.39.1`](https://github.com/github/codeql-action/releases/tag/v4.39.1)：
+
+- 触发：`push` / `pull_request`（`main`）、每周定时、手动 `workflow_dispatch`
+- 语言：Java（手动 `gradlew compileJava`）与 GitHub Actions 工作流
+- 查询套件：`security-extended` + `security-and-quality`
+- 结果：GitHub → **Security** → **Code scanning**
+
+首次启用若看不到结果，请在仓库 Settings → Code security → Code scanning 中确认 Advanced setup 已生效（Actions 权限需允许 `security-events: write`）。
+
 ## 开源范围说明
 
 本仓库为开源部分。以下内容**不开源**，不会出现在本 GitHub 仓库中：
